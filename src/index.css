@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Syne', 'Cormorant Garamond', sans-serif;
+    --font-mythic: 'Cormorant Garamond', Georgia, serif;
+    --font-hud: 'Rajdhani', sans-serif;
+    --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'Space Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #05070b;
+    color: #f4efe6;
+    user-select: none;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mythic {
+  font-family: var(--font-mythic);
+}
+
+.font-hud {
+  font-family: var(--font-hud);
+  font-variant-numeric: tabular-nums;
+}
+
+.font-sans {
+  font-family: var(--font-sans);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chamfered & Tactical AAA HUD Clip Paths */
+.clip-blade-right {
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
+}
+
+.clip-chamfer {
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
+}
+
+.clip- slanted-bar {
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+
+/* Subtle Cinematic Vignette Overlay on 3D Viewport */
+.cinematic-vignette {
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(5, 7, 11, 0) 58%,
+    rgba(4, 6, 12, 0.42) 86%,
+    rgba(2, 4, 8, 0.78) 100%
+  );
+}
+
+/* Custom subtle scrollbars for codex panels */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(6, 9, 15, 0.75);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.45);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.85);
+}

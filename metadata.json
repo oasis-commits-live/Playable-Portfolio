@@ -1,0 +1,6 @@
+{
+  "name": "Aryavarta — Ancient India 3D Portfolio World",
+  "description": "An interactive third-person 3D portfolio world set in Ancient India. Navigate the realm via WASD, touch, or Gamepad controller to explore architectural monuments representing engineering projects, philosophy, and career chronicles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
