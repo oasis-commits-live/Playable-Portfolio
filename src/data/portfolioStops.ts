@@ -105,7 +105,7 @@ export const CREATOR_PROFILE = {
   manifesto:
     "I craft standout 0→1 products and design systems for early-stage organizations across FinTech AI, SaaS, EdTech, and Gaming — transforming dense operational workflows into intuitive human experiences. I view myself as a complete builder rather than a single label: the true measure of design is the business and human impact it leaves behind. In September, after shipping an organization-wide brand design system and internal Ops platform as Lead Product Designer at Cheggout, I experienced a sudden restructuring layoff. This world is my answer: a playable testament that a layoff can end a role, but never the craft, velocity, or fire of the creator.",
   layoffStory:
-    "In September 2026, right after architecting Cheggout's organization-wide brand design system, internal multi-channel Ops reward engine, and partner banking Mystery Box UX as Lead Product Designer, a sudden restructuring layoff hit. Rather than letting a layoff define the narrative, I forged Aryavarta — turning 4+ years of shipped 0→1 FinTech AI ($3M ARR at Hyperbots), SaaS, and gaming craft into Astra weapons to vanquish the September Layoff Colossus.",
+    "In September 2026, right after architecting Cheggout's organization-wide brand design system, internal multi-channel Ops reward engine, and partner banking Mystery Box UX as Lead Product Designer, a sudden restructuring layoff hit. Rather than letting a layoff define the narrative, I forged Portfolio Verse — turning 4+ years of shipped 0→1 FinTech AI ($3M ARR at Hyperbots), SaaS, and gaming craft into Astra weapons to vanquish the September Layoff Colossus.",
   skills: [
     {
       group: 'Core Product & Design Craft',
@@ -139,7 +139,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
     era: 'Jan 2022 — Jul 2023',
     summary:
       'Began as a Game Thinker at BINCA Games shipping physical phonics & board games to Hamleys shelves, followed by Skillmatics crafting educational games for ages 6–10 and 3D toy prototypes.',
-    unlockCondition: 'Begin your quest in Aryavarta',
+    unlockCondition: 'Begin your quest in Portfolio Verse',
   },
   {
     act: 'ACT II',
@@ -868,12 +868,103 @@ export const LOTUS_RELICS: LotusRelic[] = [
   },
 ];
 
+export type WeaponId =
+  | 'weapon-nandaka'
+  | 'weapon-surya-greatsword'
+  | 'weapon-agni-twinblades'
+  | 'weapon-brahmastra-halberd';
+
+export interface ForgeWeapon {
+  id: WeaponId;
+  keySlot: 1 | 2 | 3 | 4;
+  name: string;
+  sanskritName: string;
+  category: string;
+  craftInspiration: string;
+  baseDamageBonus: number;
+  postureBonus: number;
+  reachBonus: number;
+  speedMultiplier: number;
+  colorHex: string;
+  lore: string;
+  position: { x: number; z: number };
+}
+
+export const FORGE_WEAPONS: ForgeWeapon[] = [
+  {
+    id: 'weapon-nandaka',
+    keySlot: 1,
+    name: 'Nandaka Sovereign Katana',
+    sanskritName: 'नन्दक खड्ग · Precision Design Blade',
+    category: 'Balanced Single-Edge Katana',
+    craftInspiration: '0→1 Product Architecture & Figma Precision',
+    baseDamageBonus: 8,
+    postureBonus: 14,
+    reachBonus: 0.4,
+    speedMultiplier: 1.15,
+    colorHex: '#38bdf8',
+    lore: 'Forged at the Meru Lookout Anvil. Balanced for razor-sharp 3-stage combos and frame-perfect Sekiro deflects.',
+    position: { x: 6.5, z: 3.5 },
+  },
+  {
+    id: 'weapon-surya-greatsword',
+    keySlot: 2,
+    name: 'Surya-Vajra Odachi Greatsword',
+    sanskritName: 'सूर्य वज्र · Enterprise System Cleaver',
+    category: 'Heavy Solar Great-Blade',
+    craftInspiration: '$3M ARR FinTech AI & Enterprise Design Systems',
+    baseDamageBonus: 26,
+    postureBonus: 34,
+    reachBonus: 1.35,
+    speedMultiplier: 0.92,
+    colorHex: '#f59e0b',
+    lore: 'Enshrined at the Eastern Solar Forge. Massive golden broad-blade that shatters enemy posture in two cleaves.',
+    position: { x: 15.5, z: -12.5 },
+  },
+  {
+    id: 'weapon-agni-twinblades',
+    keySlot: 3,
+    name: 'Agni-Vayu Twin Sabers',
+    sanskritName: 'अग्नि वायु · 24-Hr Velocity Scimitars',
+    category: 'Dual-Wielded Curved Sabers',
+    craftInspiration: 'Rapid Prototyping, Jitter Motion & AI Sprints',
+    baseDamageBonus: 18,
+    postureBonus: 22,
+    reachBonus: 0.75,
+    speedMultiplier: 1.38,
+    colorHex: '#10b981',
+    lore: 'Enshrined at the Western Emerald Forge. Blazing twin emerald scimitars that unleash relentless cross-slashes.',
+    position: { x: -15.5, z: -12.5 },
+  },
+  {
+    id: 'weapon-brahmastra-halberd',
+    keySlot: 4,
+    name: 'Brahmastra Celestial Naginata',
+    sanskritName: 'ब्रह्मास्त्र शूल · Full-Stack Sovereign Spear',
+    category: 'Long-Reach Polearm Glaive',
+    craftInspiration: 'Full-Stack AI + Blender 3D + Supabase Engineering',
+    baseDamageBonus: 32,
+    postureBonus: 38,
+    reachBonus: 2.1,
+    speedMultiplier: 1.05,
+    colorHex: '#ec4899',
+    lore: 'Forged before the Northern Citadel Gate. Supreme reach and sweeping 360-degree crimson-gold shockwaves.',
+    position: { x: -5.5, z: -34.0 },
+  },
+];
+
+export type DemonArchetype = 'berserker' | 'stalker' | 'vanguard';
+
 export interface DemonSpawnConfig {
   id: string;
   name: string;
   title: string;
+  archetype: DemonArchetype;
   position: { x: number; z: number };
   maxHp: number;
+  attackDamage: number;
+  aggroRange: number;
+  moveSpeed: number;
   scale: number;
   colorHex: number;
 }
@@ -883,55 +974,79 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     id: 'demon-fragmentation',
     name: 'Asura of Siloed Data',
     title: '15-Tab Fragmentation Fiend',
-    position: { x: -14, z: -18 },
-    maxHp: 45,
-    scale: 1.05,
+    archetype: 'vanguard',
+    position: { x: -7.5, z: -16.5 },
+    maxHp: 90,
+    attackDamage: 26,
+    aggroRange: 21,
+    moveSpeed: 5.4,
+    scale: 1.12,
     colorHex: 0xdc2626,
   },
   {
     id: 'demon-slackdrop',
     name: 'Asura of Lost Handoffs',
     title: 'Buried Thread Phantom',
-    position: { x: 24, z: -18 },
-    maxHp: 45,
-    scale: 1.05,
+    archetype: 'stalker',
+    position: { x: 18.5, z: -15.5 },
+    maxHp: 85,
+    attackDamage: 24,
+    aggroRange: 22,
+    moveSpeed: 6.2,
+    scale: 1.08,
     colorHex: 0xea580c,
   },
   {
     id: 'demon-burnout',
     name: 'Asura of Sprint Burnout',
     title: 'Monotony Marauder',
-    position: { x: 26, z: 12 },
-    maxHp: 50,
-    scale: 1.1,
+    archetype: 'berserker',
+    position: { x: 21.0, z: 10.5 },
+    maxHp: 105,
+    attackDamage: 30,
+    aggroRange: 22,
+    moveSpeed: 5.8,
+    scale: 1.16,
     colorHex: 0x9333ea,
   },
   {
     id: 'demon-latefee',
     name: 'Asura of Late Penalties',
     title: 'Cash-Flow Leech',
-    position: { x: -25, z: 12 },
-    maxHp: 50,
-    scale: 1.1,
+    archetype: 'vanguard',
+    position: { x: -21.0, z: 10.5 },
+    maxHp: 100,
+    attackDamage: 28,
+    aggroRange: 21,
+    moveSpeed: 5.5,
+    scale: 1.14,
     colorHex: 0xb91c1c,
   },
   {
     id: 'demon-coldbot',
     name: 'Asura of Soulless AI',
     title: 'Mechanical Jargon Golem',
-    position: { x: -24, z: -6 },
-    maxHp: 45,
-    scale: 1.0,
+    archetype: 'stalker',
+    position: { x: -19.5, z: -7.5 },
+    maxHp: 90,
+    attackDamage: 25,
+    aggroRange: 22,
+    moveSpeed: 6.0,
+    scale: 1.08,
     colorHex: 0xdb2777,
   },
   {
     id: 'demon-ocrerror',
     name: 'Asura of 11-Day Backlogs',
     title: 'Manual Data-Entry Demon',
-    position: { x: 14, z: 22 },
-    maxHp: 55,
-    scale: 1.15,
-    colorHex: 0x7c3aed,
+    archetype: 'berserker',
+    position: { x: -8.5, z: -10.5 },
+    maxHp: 110,
+    attackDamage: 32,
+    aggroRange: 20,
+    moveSpeed: 5.7,
+    scale: 1.14,
+    colorHex: 0xdc2626,
   },
 ];
 
@@ -940,6 +1055,6 @@ export const LAYOFF_BOSS_CONFIG = {
   name: 'MAHA-ASURA: THE SEPTEMBER LAYOFF',
   subtitle: 'The Sudden September Restructuring Colossus · Final Trial of Resilience',
   spawnPosition: { x: 0, z: -48 },
-  maxHp: 320,
-  scale: 2.65,
+  maxHp: 420,
+  scale: 2.75,
 };

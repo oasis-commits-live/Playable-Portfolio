@@ -1,6 +1,6 @@
 {
-  "name": "Aryavarta — Ancient India 3D Portfolio World",
-  "description": "An interactive third-person 3D portfolio world set in Ancient India. Navigate the realm via WASD, touch, or Gamepad controller to explore architectural monuments representing engineering projects, philosophy, and career chronicles.",
+  "name": "Portfolio Verse — Interactive 3D Action-RPG Portfolio World",
+  "description": "Portfolio Verse is an interactive third-person 3D action-RPG portfolio world. Explore architectural sanctums, collect sacred career jewels, wield 4 divine weapons, and vanquish the September Layoff Boss.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

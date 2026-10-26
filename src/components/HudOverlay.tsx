@@ -5,6 +5,9 @@ import {
   STORY_CHAPTERS,
   PortfolioStop,
   LOTUS_RELICS,
+  FORGE_WEAPONS,
+  WeaponId,
+  ForgeWeapon,
 } from '../data/portfolioStops';
 import { TimeOfDay } from '../game/proceduralScene';
 import { computeCompletionStats, computeCompassRibbonOffset } from '../game/worldLogic';
@@ -38,6 +41,37 @@ export interface CombatFloatingPopup {
   kind: 'damage' | 'crit' | 'parry' | 'deathblow';
 }
 
+export interface WorldAffordanceMarker {
+  id: string;
+  kind: 'project' | 'jewel' | 'weapon' | 'enemy';
+  xPct: number;
+  yPct: number;
+  distance: number;
+  title: string;
+  subtitle: string;
+  accentColor: string;
+  completed?: boolean;
+  equipped?: boolean;
+  hp?: number;
+  maxHp?: number;
+  posture?: number;
+  maxPosture?: number;
+  aiState?: string;
+}
+
+export interface EngagedDemonTelemetry {
+  id: string;
+  name: string;
+  title: string;
+  archetype: string;
+  hp: number;
+  maxHp: number;
+  posture: number;
+  maxPosture: number;
+  aiState: string;
+  distance: number;
+}
+
 export interface HudTelemetry {
   x: number;
   z: number;
@@ -45,9 +79,21 @@ export interface HudTelemetry {
   regionName: string;
   nearStop: PortfolioStop | null;
   nearDistance: number;
+  nearWeaponForge?: ForgeWeapon | null;
+  equippedWeaponId?: WeaponId;
+  equippedWeaponName?: string;
+  trackedTarget?: {
+    id: string;
+    kind: 'project' | 'jewel' | 'weapon';
+    title: string;
+    subtitle: string;
+    distance: number;
+    accentColor: string;
+  } | null;
   distanceTraveled: number;
   playerHp?: number;
   playerMaxHp?: number;
+  playerHurtFlash?: number;
   stamina?: number;
   attackDamage?: number;
   unlockedPowersCount?: number;
@@ -63,6 +109,7 @@ export interface HudTelemetry {
   storySummary?: string;
   aliveDemonsCount?: number;
   nearestDemonName?: string | null;
+  engagedDemon?: EngagedDemonTelemetry | null;
   bossAwakened?: boolean;
   bossDefeated?: boolean;
   bossHp?: number;
@@ -74,6 +121,7 @@ export interface HudTelemetry {
   grappleTargetTitle?: string | null;
   combatCallout?: string | null;
   combatPopups?: CombatFloatingPopup[];
+  affordanceMarkers?: WorldAffordanceMarker[];
   waypointScreen?: {
     xPct: number;
     yPct: number;
@@ -95,6 +143,9 @@ interface HudOverlayProps {
   recentRelicToast: string | null;
   onInspectStop: (stopId: string) => void;
   onTeleportToStop: (stopId: string) => void;
+  onTeleportToPoint?: (x: number, z: number, label: string) => void;
+  onEquipWeapon?: (weaponId: WeaponId) => void;
+  onSelectGuidanceTarget?: (id: string, kind: 'project' | 'jewel' | 'weapon') => void;
   onTriggerAttack: (isNova?: boolean) => void;
   onTriggerParry: () => void;
   onTriggerDash?: () => void;
@@ -121,6 +172,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   recentRelicToast,
   onInspectStop,
   onTeleportToStop,
+  onTeleportToPoint,
+  onEquipWeapon,
+  onSelectGuidanceTarget,
   onTriggerAttack,
   onTriggerParry,
   onTriggerDash,
@@ -134,30 +188,44 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onResumeFromMastery,
 }) => {
   const [sanctumBarExpanded, setSanctumBarExpanded] = useState(true);
+  const [navCategory, setNavCategory] = useState<'projects' | 'jewels' | 'weapons'>('projects');
   const [storyDrawerOpen, setStoryDrawerOpen] = useState(false);
   const [minimapVisible, setMinimapVisible] = useState(true);
 
-  // Delayed damage trail for Player HP and Boss HP (Sekiro / Elden Ring white-gold drain bar)
+  // Delayed damage trail for Player HP, Engaged Enemy HP, and Boss HP
   const pranaValue = telemetry.playerHp ?? 320;
   const pranaMax = telemetry.playerMaxHp ?? 320;
   const pranaPct = Math.max(0, Math.min(100, Math.round((pranaValue / pranaMax) * 100)));
   const [trailingPranaPct, setTrailingPranaPct] = useState(pranaPct);
+
+  const engagedEnemy = telemetry.engagedDemon ?? null;
+  const enemyHpPct = engagedEnemy
+    ? Math.max(0, Math.min(100, Math.round((engagedEnemy.hp / engagedEnemy.maxHp) * 100)))
+    : 100;
+  const [trailingEnemyPct, setTrailingEnemyPct] = useState(enemyHpPct);
 
   const bossHpVal = telemetry.bossHp ?? 320;
   const bossMaxHpVal = telemetry.bossMaxHp ?? 320;
   const bossHpPct = Math.max(0, Math.min(100, Math.round((bossHpVal / bossMaxHpVal) * 100)));
   const [trailingBossPct, setTrailingBossPct] = useState(bossHpPct);
 
-  // Cinematic Region Discovery Banner (Elden Ring / Ghost of Tsushima style)
+  // Cinematic Region Discovery Banner
   const [regionBannerText, setRegionBannerText] = useState<string | null>(null);
   const lastRegionRef = useRef<string>('');
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      setTrailingPranaPct((prev) => (pranaPct < prev ? pranaPct : pranaPct));
+      setTrailingPranaPct(pranaPct);
     }, 450);
     return () => window.clearTimeout(t);
   }, [pranaPct]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setTrailingEnemyPct(enemyHpPct);
+    }, 380);
+    return () => window.clearTimeout(t);
+  }, [enemyHpPct]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -206,7 +274,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   );
 
   const staminaPct = telemetry.stamina ?? 100;
-  const attackDmg = telemetry.attackDamage ?? 18;
+  const attackDmg = telemetry.attackDamage ?? 22;
   const aliveDemons = telemetry.aliveDemonsCount ?? 6;
   const bossPosture = telemetry.bossPosture ?? 0;
   const bossMaxPosture = telemetry.bossMaxPosture ?? 180;
@@ -214,6 +282,8 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   const comboHits = telemetry.comboHitCount ?? 0;
   const comboRank = telemetry.comboRankCode ?? 'D';
   const comboTitle = telemetry.comboRankTitle ?? '';
+  const equippedWeaponId = telemetry.equippedWeaponId ?? 'weapon-nandaka';
+  const hurtFlash = telemetry.playerHurtFlash ?? 0;
 
   const cycleTimeOfDay = () => {
     const order: TimeOfDay[] = ['dawn', 'noon', 'twilight'];
@@ -223,7 +293,19 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
   return (
     <div className="fixed inset-0 z-20 pointer-events-none select-none cinematic-vignette">
-      {/* 0. DYNAMIC CENTER RETICLE (Reacts to Grapple Target & Combat Mode) */}
+      {/* PLAYER DAMAGE HIT FLASH OVERLAY */}
+      {hurtFlash > 0.02 && (
+        <div
+          className="fixed inset-0 pointer-events-none z-10 transition-opacity duration-100"
+          style={{
+            background:
+              'radial-gradient(circle at center, transparent 45%, rgba(225, 29, 72, 0.55) 100%)',
+            opacity: Math.min(0.85, hurtFlash),
+          }}
+        />
+      )}
+
+      {/* 0. DYNAMIC CENTER RETICLE */}
       {gameState === 'playing' && !activeStopId && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-70">
           <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
@@ -242,6 +324,127 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </svg>
         </div>
       )}
+
+      {/* 0A. IN-WORLD 3D AFFORDANCE BADGES (DISTINGUISHING PROJECTS, JEWELS, WEAPONS & ENEMY HP BARS) */}
+      {gameState === 'playing' &&
+        !activeStopId &&
+        telemetry.affordanceMarkers &&
+        telemetry.affordanceMarkers.map((m) => {
+          if (m.kind === 'enemy') {
+            const hpPct = Math.max(0, Math.min(100, Math.round(((m.hp ?? 0) / (m.maxHp ?? 1)) * 100)));
+            const posPct = Math.max(
+              0,
+              Math.min(100, Math.round(((m.posture ?? 0) / (m.maxPosture ?? 1)) * 100))
+            );
+            const isPerilous = m.aiState === 'windup' || m.aiState === 'strike';
+            return (
+              <div
+                key={m.id}
+                className="absolute -translate-x-1/2 -translate-y-full pointer-events-none z-10 flex flex-col items-center transition-all duration-75"
+                style={{ left: `${m.xPct}%`, top: `${m.yPct}%` }}
+              >
+                {isPerilous && (
+                  <div className="mb-0.5 px-1.5 py-0.2 bg-[#e11d48] text-white font-hud text-[9px] font-bold tracking-[0.2em] uppercase animate-pulse shadow-lg">
+                    危 PERILOUS {m.aiState === 'strike' ? 'STRIKE!' : 'ATTACK — DEFLECT [RMB]!'}
+                  </div>
+                )}
+                <div className="px-2 py-1 bg-[#09040a]/92 border border-[#f43f5e]/70 shadow-[0_6px_18px_rgba(0,0,0,0.9)] min-w-[126px]">
+                  <div className="flex items-center justify-between gap-2 text-[9px] font-hud font-bold tracking-wider uppercase">
+                    <span className="text-[#fda4af] truncate max-w-[85px]">{m.title}</span>
+                    <span className="font-mono text-[#fef08a] tabular-nums">
+                      {m.hp}/{m.maxHp}
+                    </span>
+                  </div>
+                  {/* Enemy Vitality Bar */}
+                  <div className="h-1.5 w-full bg-[#240610] border border-[#f43f5e]/40 mt-0.5 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#be123c] via-[#f43f5e] to-[#fb7185] transition-all duration-100"
+                      style={{ width: `${hpPct}%` }}
+                    />
+                  </div>
+                  {/* Enemy Sekiro Posture Bar */}
+                  <div className="h-1 w-full bg-[#1c1306] mt-0.5 overflow-hidden">
+                    <div
+                      className="h-full bg-[#f59e0b] transition-all duration-100"
+                      style={{ width: `${posPct}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          const badgeMeta =
+            m.kind === 'project'
+              ? {
+                  tag: 'PROJECT SANCTUM',
+                  bg: 'bg-[#07111e]/90',
+                  border: 'border-[#d4af37]',
+                  tagColor: 'text-[#d4af37]',
+                  icon: '◆',
+                }
+              : m.kind === 'jewel'
+              ? {
+                  tag: 'CAREER JEWEL',
+                  bg: 'bg-[#170926]/90',
+                  border: 'border-[#c084fc]',
+                  tagColor: 'text-[#e879f9]',
+                  icon: '❖',
+                }
+              : {
+                  tag: 'WEAPON FORGE',
+                  bg: 'bg-[#1a1005]/90',
+                  border: 'border-[#38bdf8]',
+                  tagColor: 'text-[#38bdf8]',
+                  icon: '⚔',
+                };
+
+          return (
+            <div
+              key={m.id}
+              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-10 transition-all duration-75"
+              style={{ left: `${m.xPct}%`, top: `${m.yPct}%` }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  if (m.kind === 'project') {
+                    onTeleportToStop(m.id);
+                  } else if (m.kind === 'weapon' && onEquipWeapon) {
+                    onEquipWeapon(m.id as WeaponId);
+                    onSelectGuidanceTarget?.(m.id, 'weapon');
+                  } else if (m.kind === 'jewel') {
+                    onSelectGuidanceTarget?.(m.id, 'jewel');
+                  }
+                }}
+                className={`group flex flex-col items-center cursor-pointer`}
+              >
+                <div
+                  className={`px-2.5 py-1 ${badgeMeta.bg} border-l-2 ${badgeMeta.border} backdrop-blur-md shadow-[0_6px_20px_rgba(0,0,0,0.85)] group-hover:scale-105 transition-transform text-left`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`font-mono text-[8px] font-bold tracking-[0.18em] uppercase ${badgeMeta.tagColor}`}
+                    >
+                      {badgeMeta.icon} {badgeMeta.tag}
+                    </span>
+                    <span className="font-mono text-[9px] text-[#fef08a] tabular-nums">
+                      {m.distance}m
+                    </span>
+                  </div>
+                  <div className="font-hud text-[11px] font-bold text-[#f8f5ee] tracking-wide whitespace-nowrap">
+                    {m.title}
+                  </div>
+                  <div className="font-mono text-[8px] text-[#94a3b8] uppercase tracking-wider">
+                    {m.subtitle}
+                  </div>
+                </div>
+                <div className="w-2 h-2 rotate-45 bg-[#d4af37] -mt-1 border border-[#05070b]" />
+              </button>
+            </div>
+          );
+        })}
 
       {/* 0B. FLOATING SCREEN-SPACE COMBAT DAMAGE, DODGE & SEKIRO DEFLECT POPUPS */}
       {telemetry.combatPopups &&
@@ -276,17 +479,19 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
         ))}
 
-      {/* 1. TOP-LEFT FRAMELESS QUEST TRACKER & SANCTUM FAST-TRAVEL CHAPTERS (Ghost of Tsushima Tale Style) */}
-      <div className="absolute top-5 left-6 flex flex-col gap-2 pointer-events-auto">
+      {/* 1. TOP-LEFT UNIFIED PORTFOLIO VERSE NAVIGATOR (PROJECTS · JEWELS · WEAPONS) */}
+      <div className="absolute top-5 left-6 flex flex-col gap-2 pointer-events-auto max-w-[460px]">
         {/* Active Tale / Act Header with Left Golden Vertical Blade */}
         <div className="flex items-center gap-3 pl-3 border-l-2 border-[#d4af37]">
           <div>
-            <div className="flex items-center gap-2 font-hud text-[11px] font-bold tracking-[0.22em] uppercase text-[#d4af37]">
-              <span>{telemetry.storyAct || 'ACT I'}</span>
+            <div className="flex flex-wrap items-center gap-2 font-hud text-[11px] font-bold tracking-[0.2em] uppercase text-[#d4af37]">
+              <span>PORTFOLIO VERSE</span>
               <span>·</span>
-              <span className="text-[#2dd4bf]">{stats.visitedStopsCount}/6 SANCTUMS AWAKENED</span>
+              <span className="text-[#2dd4bf]">{stats.visitedStopsCount}/6 PROJECTS</span>
+              <span>·</span>
+              <span className="text-[#e879f9]">{stats.collectedRelicsCount}/5 JEWELS</span>
             </div>
-            <div className="flex items-center gap-2.5 mt-0.5">
+            <div className="flex flex-wrap items-center gap-2.5 mt-0.5">
               <button
                 type="button"
                 onClick={(e) => {
@@ -325,44 +530,170 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
         </div>
 
-        {/* Sleek Chapter Fast-Travel Nodes (01–06 Sanctums) */}
+        {/* Category Switcher Tabs: PROJECTS (6) | JEWELS (5) | WEAPONS (4) */}
         {sanctumBarExpanded ? (
-          <div className="flex flex-wrap items-center gap-1 pl-3">
-            {PORTFOLIO_STOPS.map((stop) => {
-              const isVisited = visitedStopIds.has(stop.id);
-              const isCurrent = activeStopId === stop.id || telemetry.nearStop?.id === stop.id;
-              return (
-                <button
-                  key={stop.id}
-                  type="button"
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    onTeleportToStop(stop.id);
-                  }}
-                  className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
-                    isCurrent
-                      ? 'bg-[#d4af37] text-[#05070b] border-[#fef08a] font-bold'
-                      : isVisited
-                      ? 'bg-[#091820]/85 text-[#2dd4bf] border-[#2dd4bf] hover:bg-[#112836]'
-                      : 'bg-[#070b14]/75 text-[#cbd5e1] border-[#d4af37]/40 hover:text-white hover:border-[#d4af37]'
-                  }`}
-                  title={`Fast-Travel & Inspect Sanctum: ${stop.title}`}
-                >
-                  {SHORT_STOP_LABELS[stop.id]}
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                setSanctumBarExpanded(false);
-              }}
-              className="px-1.5 py-0.5 font-mono text-[9px] text-[#94a3b8] hover:text-white cursor-pointer"
-              title="Toggle Sanctum Fast-Travel Strip [Tab / H]"
-            >
-              [HIDE]
-            </button>
+          <div className="pl-3 space-y-1.5">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setNavCategory('projects');
+                }}
+                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
+                  navCategory === 'projects'
+                    ? 'bg-[#d4af37] text-[#05070b]'
+                    : 'bg-[#070b14]/85 text-[#cbd5e1] border border-[#d4af37]/30 hover:text-white'
+                }`}
+              >
+                ◆ Projects ({stats.visitedStopsCount}/6)
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setNavCategory('jewels');
+                }}
+                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
+                  navCategory === 'jewels'
+                    ? 'bg-[#c084fc] text-[#05070b]'
+                    : 'bg-[#070b14]/85 text-[#e9d5ff] border border-[#c084fc]/30 hover:text-white'
+                }`}
+              >
+                ❖ Jewels ({stats.collectedRelicsCount}/5)
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setNavCategory('weapons');
+                }}
+                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
+                  navCategory === 'weapons'
+                    ? 'bg-[#38bdf8] text-[#05070b]'
+                    : 'bg-[#070b14]/85 text-[#bae6fd] border border-[#38bdf8]/30 hover:text-white'
+                }`}
+              >
+                ⚔ Weapons (4)
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setSanctumBarExpanded(false);
+                }}
+                className="px-1.5 py-0.5 font-mono text-[9px] text-[#94a3b8] hover:text-white cursor-pointer"
+                title="Toggle Navigator [Tab / H]"
+              >
+                [HIDE]
+              </button>
+            </div>
+
+            {/* Category 1: 6 Shipped Project Sanctums */}
+            {navCategory === 'projects' && (
+              <div className="flex flex-wrap items-center gap-1">
+                {PORTFOLIO_STOPS.map((stop) => {
+                  const isVisited = visitedStopIds.has(stop.id);
+                  const isCurrent =
+                    activeStopId === stop.id ||
+                    telemetry.nearStop?.id === stop.id ||
+                    telemetry.trackedTarget?.id === stop.id;
+                  return (
+                    <button
+                      key={stop.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        onSelectGuidanceTarget?.(stop.id, 'project');
+                        onTeleportToStop(stop.id);
+                      }}
+                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
+                        isCurrent
+                          ? 'bg-[#d4af37] text-[#05070b] border-[#fef08a] font-bold'
+                          : isVisited
+                          ? 'bg-[#091820]/85 text-[#2dd4bf] border-[#2dd4bf] hover:bg-[#112836]'
+                          : 'bg-[#070b14]/75 text-[#cbd5e1] border-[#d4af37]/40 hover:text-white hover:border-[#d4af37]'
+                      }`}
+                      title={`Track & Teleport to Project Sanctum: ${stop.title}`}
+                    >
+                      {SHORT_STOP_LABELS[stop.id]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Category 2: 5 Career Experience Lotus Jewels */}
+            {navCategory === 'jewels' && (
+              <div className="flex flex-wrap items-center gap-1">
+                {LOTUS_RELICS.map((relic, idx) => {
+                  const isCollected = collectedRelicIds.has(relic.id);
+                  const isTracked = telemetry.trackedTarget?.id === relic.id;
+                  return (
+                    <button
+                      key={relic.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        onSelectGuidanceTarget?.(relic.id, 'jewel');
+                        onTeleportToPoint?.(
+                          relic.position.x,
+                          relic.position.z + 1.8,
+                          `JEWEL · ${relic.company}`
+                        );
+                      }}
+                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
+                        isTracked
+                          ? 'bg-[#c084fc] text-[#05070b] border-white font-bold'
+                          : isCollected
+                          ? 'bg-[#190d26]/85 text-[#e879f9] border-[#c084fc] hover:bg-[#2a1440]'
+                          : 'bg-[#070b14]/80 text-[#cbd5e1] border-[#c084fc]/45 hover:text-white'
+                      }`}
+                      title={`${relic.name} (${relic.era}) — Click to Track & Teleport`}
+                    >
+                      J0{idx + 1} · {relic.company.split(' ')[0]} {isCollected ? '✓' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Category 3: 4 Divine Weapons & Armory Forges */}
+            {navCategory === 'weapons' && (
+              <div className="flex flex-wrap items-center gap-1">
+                {FORGE_WEAPONS.map((w, idx) => {
+                  const isEquipped = equippedWeaponId === w.id;
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        onEquipWeapon?.(w.id);
+                        onSelectGuidanceTarget?.(w.id, 'weapon');
+                      }}
+                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
+                        isEquipped
+                          ? 'bg-[#38bdf8] text-[#05070b] border-white font-bold'
+                          : 'bg-[#070b14]/80 text-[#bae6fd] border-[#38bdf8]/45 hover:text-white'
+                      }`}
+                      title={`[${idx + 1}] Equip ${w.name} (+${w.baseDamageBonus} ATK · ${w.category})`}
+                    >
+                      [{idx + 1}] {w.name.split(' ')[0]} {isEquipped ? '★' : `+${w.baseDamageBonus}`}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Active 3D Guidance Trail Indicator */}
+            {telemetry.trackedTarget && (
+              <div className="flex items-center gap-2 text-[10px] font-mono text-[#fef08a] bg-[#060a14]/80 px-2 py-0.5 border-l border-[#d4af37]">
+                <span>GOLDEN TRAIL →</span>
+                <span className="font-bold text-white">{telemetry.trackedTarget.title}</span>
+                <span className="text-[#2dd4bf]">({telemetry.trackedTarget.distance}m)</span>
+              </div>
+            )}
           </div>
         ) : (
           <button
@@ -373,7 +704,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             }}
             className="pl-3 font-hud text-[11px] tracking-[0.18em] uppercase text-[#94a3b8] hover:text-[#d4af37] text-left cursor-pointer"
           >
-            + SHOW 6 SANCTUMS [TAB]
+            + SHOW NAVIGATOR (PROJECTS · JEWELS · WEAPONS) [TAB]
           </button>
         )}
 
@@ -415,10 +746,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         )}
       </div>
 
-      {/* 2. TOP-CENTER FRAMELESS SKYLINE COMPASS + ELDEN RING BOSS BAR + REGION BANNER */}
+      {/* 2. TOP-CENTER FRAMELESS SKYLINE COMPASS + ENGAGED ASURA BAR / ELDEN RING BOSS BAR */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none hidden sm:flex flex-col items-center">
         {/* Frameless Horizon Compass Ribbon */}
-        <div className="relative w-72 h-6 overflow-hidden flex items-center border-b border-[#d4af37]/30">
+        <div className="relative w-80 h-6 overflow-hidden flex items-center border-b border-[#d4af37]/30">
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rotate-45 bg-[#d4af37] z-20" />
 
           {COMPASS_CARDINALS.map((c) => {
@@ -470,9 +801,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           })}
         </div>
 
-        {/* Cinematic Region Discovery Callout (Fades out automatically after 2.8s) */}
-        {regionBannerText && !telemetry.bossAwakened && (
-          <div className="mt-4 flex flex-col items-center animate-fade-in">
+        {/* Cinematic Region Discovery Callout */}
+        {regionBannerText && !telemetry.bossAwakened && !engagedEnemy && (
+          <div className="mt-3 flex flex-col items-center animate-fade-in">
             <span className="font-mythic italic text-lg text-[#d4af37] tracking-wide drop-shadow">
               {regionBannerText.split('·')[0].trim()}
             </span>
@@ -487,10 +818,65 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
         )}
 
+        {/* ENGAGED ASURA ENEMY TARGET VITALITY & POSTURE BAR (Shows live decreasing HP during fights!) */}
+        {engagedEnemy && (!telemetry.bossAwakened || telemetry.bossDefeated) && (
+          <div
+            data-testid="engaged-enemy-hud"
+            className="mt-2.5 w-[350px] max-w-[86vw] bg-[#08040c]/88 border border-[#f43f5e]/55 px-3.5 py-2 backdrop-blur-md shadow-2xl space-y-1"
+          >
+            <div className="flex items-center justify-between text-[10px] font-hud uppercase tracking-[0.18em]">
+              <span className="text-[#fda4af] font-bold flex items-center gap-1.5">
+                <span className="w-2 h-2 rotate-45 bg-[#f43f5e]" />
+                <span>
+                  {engagedEnemy.name} · {engagedEnemy.title}
+                </span>
+              </span>
+              <span className="font-mono text-[#fef08a] tabular-nums">
+                {engagedEnemy.hp} / {engagedEnemy.maxHp} HP
+              </span>
+            </div>
+
+            {/* Enemy Vitality Bar with Delayed White-Gold Damage Trail */}
+            <div className="relative h-2.5 w-full bg-[#1f0610] border border-[#f43f5e]/50 overflow-hidden">
+              <div
+                className="absolute inset-y-0 left-0 bg-[#fef08a]/85 transition-all duration-400"
+                style={{ width: `${trailingEnemyPct}%` }}
+              />
+              <div
+                className="relative h-full bg-gradient-to-r from-[#9f1239] via-[#e11d48] to-[#fb7185] transition-all duration-100"
+                style={{ width: `${enemyHpPct}%` }}
+              />
+            </div>
+
+            {/* Enemy Posture Bar & AI Status */}
+            <div className="flex items-center justify-between gap-3 pt-0.5">
+              <div className="flex-1 h-1.5 bg-[#1c1306] border border-[#d4af37]/35 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-[#f59e0b] to-[#fef08a] transition-all duration-100"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round((engagedEnemy.posture / engagedEnemy.maxPosture) * 100)
+                    )}%`,
+                  }}
+                />
+              </div>
+              <span className="font-mono text-[9px] uppercase tracking-wider text-[#fde68a]">
+                {engagedEnemy.aiState === 'windup'
+                  ? '危 WINDUP — DEFLECT [RMB]!'
+                  : engagedEnemy.aiState === 'strike'
+                  ? '危 LUNGING STRIKE!'
+                  : engagedEnemy.posture >= engagedEnemy.maxPosture * 0.85
+                  ? '忍殺 DEATHBLOW READY!'
+                  : `POSTURE ${Math.round(engagedEnemy.posture)}/${engagedEnemy.maxPosture}`}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Sekiro / Elden Ring Colossal September Layoff Boss Bar */}
         {telemetry.bossAwakened && !telemetry.bossDefeated && (
           <div className="mt-3 w-[420px] max-w-[90vw] flex flex-col items-center space-y-1.5">
-            {/* Sekiro Central Posture Bar */}
             <div className="w-64 flex flex-col items-center">
               <div className="text-[10px] font-hud font-bold tracking-[0.2em] uppercase text-[#fef08a]">
                 {bossPosture >= bossMaxPosture
@@ -507,7 +893,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               </div>
             </div>
 
-            {/* Elden Ring Wide Boss Vitality Bar with Delayed White-Gold Trail */}
             <div className="w-full space-y-0.5">
               <div className="flex items-baseline justify-between px-1">
                 <span className="font-mythic italic font-bold text-base text-[#ffe4e6] tracking-wide drop-shadow">
@@ -518,12 +903,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 </span>
               </div>
               <div className="relative h-2.5 w-full bg-[#1a060d]/90 border border-[#d4af37]/60 overflow-hidden">
-                {/* Delayed White-Gold Damage Drain Bar */}
                 <div
                   className="absolute inset-y-0 left-0 bg-[#fef08a]/80 transition-all duration-500"
                   style={{ width: `${trailingBossPct}%` }}
                 />
-                {/* Active Crimson Boss HP Bar */}
                 <div
                   className="relative h-full bg-gradient-to-r from-[#881337] via-[#e11d48] to-[#f43f5e] transition-all duration-100"
                   style={{ width: `${bossHpPct}%` }}
@@ -534,10 +917,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         )}
       </div>
 
-      {/* 3. TOP-RIGHT SYSTEM GLYPHS, RADAR & KINETIC COMBO STYLE RANK */}
+      {/* 3. TOP-RIGHT SYSTEM GLYPHS, COLOR-CODED RADAR & KINETIC COMBO STYLE RANK */}
       <div className="absolute top-4 right-6 flex flex-col items-end gap-2.5 pointer-events-auto">
         <div className="flex items-center gap-2 bg-[#060a12]/80 border-b border-[#d4af37]/35 px-2.5 py-1 backdrop-blur-md">
-          {/* Time-of-Day Cycle */}
           <button
             type="button"
             tabIndex={-1}
@@ -554,7 +936,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
           <span className="text-[#d4af37]/25">|</span>
 
-          {/* Toggle Radar */}
           <button
             type="button"
             tabIndex={-1}
@@ -572,7 +953,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
           <span className="text-[#d4af37]/25">|</span>
 
-          {/* Mute Audio [M] */}
           <button
             type="button"
             tabIndex={-1}
@@ -603,7 +983,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </svg>
           </button>
 
-          {/* Pause & World Atlas [P] */}
           <button
             type="button"
             tabIndex={-1}
@@ -622,13 +1001,13 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </button>
         </div>
 
-        {/* Sacred Mandala Circular Radar */}
+        {/* Sacred Mandala Circular Radar showing Projects (Gold), Jewels (Purple), Weapons (Cyan), Boss (Crimson) */}
         {minimapVisible && (
           <div
-            className="relative w-20 h-20 rounded-full border border-[#d4af37]/50 bg-[#050911]/90 overflow-hidden"
+            className="relative w-24 h-24 rounded-full border border-[#d4af37]/50 bg-[#050911]/90 overflow-hidden"
             style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.85)' }}
           >
-            <svg width="80" height="80" viewBox="-70 -70 140 140" className="w-full h-full">
+            <svg width="96" height="96" viewBox="-70 -70 140 140" className="w-full h-full">
               <circle cx="0" cy="0" r="66" fill="#070d17" />
               <circle cx="0" cy="0" r="44" fill="none" stroke="#d4af37" strokeOpacity="0.16" strokeWidth="1" />
               <path
@@ -638,8 +1017,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 fill="none"
                 opacity="0.6"
               />
-              <circle cx="0" cy="-48" r="4" fill="#f43f5e" />
+              {/* Boss Citadel */}
+              <circle cx="0" cy="-48" r="4.2" fill="#f43f5e" />
 
+              {/* 6 Project Sanctums (Diamonds) */}
               {PORTFOLIO_STOPS.map((s) => {
                 const visited = visitedStopIds.has(s.id);
                 return (
@@ -652,6 +1033,33 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 );
               })}
 
+              {/* 5 Career Jewels (Purple Dots) */}
+              {LOTUS_RELICS.map((r) => {
+                if (collectedRelicIds.has(r.id)) return null;
+                return (
+                  <circle
+                    key={r.id}
+                    cx={r.position.x}
+                    cy={r.position.z}
+                    r="2.6"
+                    fill="#c084fc"
+                  />
+                );
+              })}
+
+              {/* 4 Weapon Forges (Cyan Squares) */}
+              {FORGE_WEAPONS.map((w) => (
+                <rect
+                  key={w.id}
+                  x={w.position.x - 2.2}
+                  y={w.position.z - 2.2}
+                  width="4.4"
+                  height="4.4"
+                  fill={equippedWeaponId === w.id ? '#fef08a' : '#38bdf8'}
+                />
+              ))}
+
+              {/* Player Heading Arrow */}
               <g
                 transform={`translate(${Math.max(-60, Math.min(60, telemetry.x))}, ${Math.max(
                   -60,
@@ -667,7 +1075,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
         )}
 
-        {/* Devil May Cry / Ghost of Tsushima Kinetic Combo Rank Emblem */}
+        {/* Kinetic Combo Rank Emblem */}
         {comboHits > 0 && (
           <div className="flex items-center gap-3 pr-1 pointer-events-none">
             <div className="text-right">
@@ -687,30 +1095,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         )}
       </div>
 
-      {/* 4. IN-WORLD FLOATING 3D WAYPOINT DIAMOND */}
-      {telemetry.waypointScreen && !activeStopId && gameState === 'playing' && (
-        <div
-          className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-10 transition-all duration-75"
-          style={{
-            left: `${telemetry.waypointScreen.xPct}%`,
-            top: `${telemetry.waypointScreen.yPct}%`,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onTeleportToStop(telemetry.waypointScreen!.stopId)}
-            className="flex flex-col items-center group cursor-pointer"
-          >
-            <div className="w-4 h-4 rotate-45 border border-[#fef9c3] bg-[#d4af37]/90 flex items-center justify-center shadow-[0_0_14px_rgba(212,175,55,0.75)] group-hover:scale-125 transition-transform">
-              <div className="w-1.5 h-1.5 bg-[#05070b]" />
-            </div>
-            <div className="mt-1 px-1.5 py-0.5 bg-[#05070b]/85 border-b border-[#d4af37]/60 text-[10px] font-hud font-bold tracking-wider text-[#f4efe6] tabular-nums whitespace-nowrap">
-              {telemetry.waypointScreen.distance}m · [G]
-            </div>
-          </button>
-        </div>
-      )}
-
       {/* Relic / Astra Power Awakened Banner */}
       {recentRelicToast && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 px-6 py-2 bg-gradient-to-r from-transparent via-[#060a14]/95 to-transparent border-y border-[#d4af37] text-xs font-hud font-bold tracking-[0.18em] uppercase text-[#fef08a] pointer-events-none z-30">
@@ -718,29 +1102,45 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         </div>
       )}
 
-      {/* Proximity Sanctum Scroll Interaction Callout */}
-      {telemetry.nearStop && !activeStopId && gameState === 'playing' && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-auto">
-          <button
-            type="button"
-            onClick={() => onInspectStop(telemetry.nearStop!.id)}
-            className="flex items-center gap-3 px-5 py-2 clip-blade-right bg-[#070b14]/95 border-l-2 border-[#d4af37] hover:bg-[#101829] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
-          >
-            <span className="px-2 py-0.5 bg-[#d4af37] text-[#05070b] font-hud font-bold text-xs tracking-wider uppercase">
-              [E] INSPECT CODEX
-            </span>
-            <span className="font-mythic italic text-base text-[#f8f5ee]">
-              {telemetry.nearStop.title}
-            </span>
-          </button>
+      {/* Proximity Sanctum Scroll OR Weapon Forge Interaction Callout */}
+      {!activeStopId && gameState === 'playing' && (telemetry.nearStop || telemetry.nearWeaponForge) && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto flex flex-col items-center gap-2">
+          {telemetry.nearStop && (
+            <button
+              type="button"
+              onClick={() => onInspectStop(telemetry.nearStop!.id)}
+              className="flex items-center gap-3 px-5 py-2 clip-blade-right bg-[#070b14]/95 border-l-2 border-[#d4af37] hover:bg-[#101829] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+            >
+              <span className="px-2 py-0.5 bg-[#d4af37] text-[#05070b] font-hud font-bold text-xs tracking-wider uppercase">
+                [E] INSPECT PROJECT CODEX
+              </span>
+              <span className="font-mythic italic text-base text-[#f8f5ee]">
+                {telemetry.nearStop.title}
+              </span>
+            </button>
+          )}
+          {telemetry.nearWeaponForge && (
+            <button
+              type="button"
+              onClick={() => onEquipWeapon?.(telemetry.nearWeaponForge!.id)}
+              className="flex items-center gap-3 px-5 py-1.5 clip-blade-right bg-[#091524]/95 border-l-2 border-[#38bdf8] hover:bg-[#12253d] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+            >
+              <span className="px-2 py-0.5 bg-[#38bdf8] text-[#05070b] font-hud font-bold text-xs tracking-wider uppercase">
+                [E] EQUIP DIVINE WEAPON
+              </span>
+              <span className="font-hud text-sm font-bold text-[#e0f2fe]">
+                {telemetry.nearWeaponForge.name} (+{telemetry.nearWeaponForge.baseDamageBonus} ATK)
+              </span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* 5. BOTTOM-LEFT AAA HERO VITALS & SUDARSHANA CHAKRA MEDALLION (Black Myth: Wukong / Sekiro Style) */}
+      {/* 5. BOTTOM-LEFT AAA HERO VITALS, SUDARSHANA MEDALLION & EQUIPPED WEAPON BAR */}
       {gameState === 'playing' && (
-        <div className="fixed bottom-5 left-6 z-20 flex items-end gap-3 pointer-events-none">
+        <div className="fixed bottom-5 left-6 z-20 flex items-end gap-3 pointer-events-auto">
           {/* Sacred 6-Petal Sudarshana Chakra SVG Medallion */}
-          <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
+          <div className="relative w-14 h-14 flex items-center justify-center shrink-0 pointer-events-none">
             <svg width="56" height="56" viewBox="0 0 64 64" className="w-full h-full">
               <circle
                 cx="32"
@@ -750,7 +1150,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 stroke="#d4af37"
                 strokeWidth="1.5"
               />
-              {/* 6 Petal Sockets representing the 6 Project Astra Powers */}
               {PORTFOLIO_STOPS.map((s, idx) => {
                 const angle = (idx / 6) * Math.PI * 2 - Math.PI / 2;
                 const cx = 32 + Math.cos(angle) * 20;
@@ -781,19 +1180,25 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </div>
           </div>
 
-          {/* Tapered Prana & Stamina Blade Bars with Delayed White-Gold Damage Trail */}
-          <div className="flex flex-col gap-1.5 pb-1">
-            <div className="flex items-center justify-between gap-6 font-hud text-[11px] tracking-[0.18em] uppercase">
+          {/* Tapered Prana & Stamina Blade Bars + Quick Weapon Switcher [1-4] */}
+          <div className="flex flex-col gap-1.5 pb-0.5">
+            <div className="flex items-center justify-between gap-4 font-hud text-[11px] tracking-[0.16em] uppercase pointer-events-none">
               <span className="text-[#f8f5ee] font-bold">
-                PRANA <span className="text-[#fda4af] tabular-nums">{pranaValue}</span>
+                PRANA{' '}
+                <span className="text-[#fda4af] tabular-nums">
+                  {pranaValue}/{pranaMax}
+                </span>
               </span>
-              <span className="text-[#94a3b8]">
-                {stats.collectedRelicsCount}/5 RELICS
+              <span className="text-[#38bdf8] font-bold">
+                ⚔ {telemetry.equippedWeaponName || 'Nandaka Sovereign Katana'}
               </span>
             </div>
 
-            {/* Double-Layer Health Blade Bar */}
-            <div className="relative w-52 sm:w-64 h-2.5 clip-blade-right bg-[#1a070e]/90 border-l-2 border-[#d4af37] overflow-hidden">
+            {/* Double-Layer Health Blade Bar with Delayed White-Gold Trail */}
+            <div
+              data-testid="player-hp-bar"
+              className="relative w-56 sm:w-68 h-2.5 clip-blade-right bg-[#1a070e]/90 border-l-2 border-[#d4af37] overflow-hidden pointer-events-none"
+            >
               <div
                 className="absolute inset-y-0 left-0 bg-[#fef08a]/85 transition-all duration-500"
                 style={{ width: `${trailingPranaPct}%` }}
@@ -805,11 +1210,36 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </div>
 
             {/* Celadon Stamina / Spirit Gauge */}
-            <div className="w-40 sm:w-48 h-1.5 clip-blade-right bg-[#061c1b]/90 border-l-2 border-[#2dd4bf] overflow-hidden">
+            <div className="w-44 sm:w-52 h-1.5 clip-blade-right bg-[#061c1b]/90 border-l-2 border-[#2dd4bf] overflow-hidden pointer-events-none">
               <div
                 className="h-full bg-gradient-to-r from-[#0d9488] to-[#2dd4bf] transition-all duration-100"
                 style={{ width: `${staminaPct}%` }}
               />
+            </div>
+
+            {/* 4-Weapon Armory Hotbar [Keys 1 - 4] */}
+            <div className="flex items-center gap-1 pt-0.5">
+              {FORGE_WEAPONS.map((w, idx) => {
+                const active = equippedWeaponId === w.id;
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      onEquipWeapon?.(w.id);
+                    }}
+                    className={`px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider cursor-pointer transition-all border ${
+                      active
+                        ? 'bg-[#d4af37] text-[#05070b] border-[#fef08a] font-bold'
+                        : 'bg-[#070b14]/85 text-[#94a3b8] border-[#d4af37]/30 hover:text-white'
+                    }`}
+                    title={`Press [${idx + 1}] to equip ${w.name} (${w.category})`}
+                  >
+                    [{idx + 1}] {w.name.split(' ')[0]}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -825,7 +1255,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               onTriggerAttack(false);
             }}
             className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#080d18]/88 hover:bg-[#162038] border-l-2 border-[#d4af37] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#f8f5ee] cursor-pointer transition-all"
-            title="Katana 3-Hit Combo [Left-Click or F]"
+            title="Weapon 3-Hit Combo [Left-Click or F]"
           >
             <span className="text-[#d4af37]">LMB</span>
             <span>Slash</span>
@@ -899,10 +1329,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             <div className="flex items-center justify-between border-b border-[#d4af37]/20 pb-3">
               <div>
                 <div className="text-[10px] font-hud font-bold text-[#d4af37] uppercase tracking-[0.22em]">
-                  WORLD ATLAS · PAUSED
+                  PORTFOLIO VERSE ATLAS · PAUSED
                 </div>
                 <h2 id="pause-modal-title" className="font-display text-xl font-bold text-[#f8f5ee]">
-                  Ayush Dubey Portfolio
+                  Ayush Dubey — Portfolio Verse
                 </h2>
               </div>
               <div className="font-hud text-xs font-bold text-[#2dd4bf] tracking-wider">
@@ -976,14 +1406,14 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <div className="w-full max-w-md bg-[#070b14] border border-[#d4af37] p-6 text-[#f4efe6] space-y-4 shadow-2xl">
             <div>
               <div className="text-xs font-hud font-bold text-[#2dd4bf] uppercase tracking-[0.24em]">
-                SEPTEMBER LAYOFF VANQUISHED
+                PORTFOLIO VERSE · SEPTEMBER LAYOFF VANQUISHED
               </div>
               <h2 id="mastery-modal-title" className="font-display text-2xl font-bold text-[#f8f5ee] mt-1">
                 Resilience Forged Through 6 Shipped Products
               </h2>
               <p className="text-xs text-[#cbd5e1] mt-1.5 leading-relaxed">
                 A sudden workforce reduction in September ended Ayush Dubey’s chapter at Cheggout,
-                but his 0→1 craft and $3M ARR impact endure.
+                but his 0→1 craft and $3M ARR impact endure across Portfolio Verse.
               </p>
             </div>
 

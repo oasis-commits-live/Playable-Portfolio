@@ -252,6 +252,9 @@ export default function App() {
           recentRelicToast={recentRelicToast}
           onInspectStop={handleInspectStop}
           onTeleportToStop={handleTeleportToStop}
+          onTeleportToPoint={(x, z, label) => controllerRef.current?.teleportToPoint(x, z, label)}
+          onEquipWeapon={(weaponId) => controllerRef.current?.equipWeapon(weaponId)}
+          onSelectGuidanceTarget={(id, kind) => controllerRef.current?.setGuidanceTarget(id, kind)}
           onTriggerAttack={(isNova) => controllerRef.current?.triggerAttack(isNova)}
           onTriggerParry={() => controllerRef.current?.triggerParryDeflect()}
           onTriggerDash={() => controllerRef.current?.triggerDodgeDash()}

@@ -4,11 +4,14 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {
   PORTFOLIO_STOPS,
   LOTUS_RELICS,
+  FORGE_WEAPONS,
   INITIAL_DEMON_SPAWNS,
   LAYOFF_BOSS_CONFIG,
   MonumentType,
+  WeaponId,
+  DemonArchetype,
 } from '../data/portfolioStops';
-import { groundHeightAt } from './worldLogic';
+import { groundHeightAt, DemonCombatState } from './worldLogic';
 
 export type TimeOfDay = 'dawn' | 'noon' | 'twilight';
 
@@ -19,11 +22,17 @@ export interface PlayerRig {
   rightLeg: THREE.Object3D;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
+  weaponArmPivot: THREE.Group;
+  elbowJoint: THREE.Group;
+  wristGrip: THREE.Group;
+  offhandArmPivot: THREE.Group;
   cloakMesh: THREE.Mesh;
   chakraHaloGroup: THREE.Group;
   dashRingMesh: THREE.Mesh;
   swordGroup: THREE.Group;
   swordBlade: THREE.Mesh;
+  weaponMeshes: Record<WeaponId, THREE.Group>;
+  equippedWeaponId: WeaponId;
   slashArcMesh: THREE.Mesh;
   comboSlashRing: THREE.Mesh;
   parryShieldMesh: THREE.Mesh;
@@ -31,6 +40,10 @@ export interface PlayerRig {
   powerOrbitals: THREE.Mesh[];
   shadowDisc: THREE.Mesh;
   glbRoot: THREE.Object3D | null;
+  rightHandBone: THREE.Object3D | null;
+  leftHandBone: THREE.Object3D | null;
+  rightArmBone: THREE.Object3D | null;
+  rightForeArmBone: THREE.Object3D | null;
   mixer: THREE.AnimationMixer | null;
   actions: {
     idle?: THREE.AnimationAction;
@@ -39,16 +52,25 @@ export interface PlayerRig {
   };
   activeActionName: 'idle' | 'walk' | 'run';
   setAnimationState: (state: 'idle' | 'walk' | 'run', speedMultiplier?: number) => void;
+  setEquippedWeapon: (weaponId: WeaponId) => void;
 }
 
 export interface DemonEntity {
   id: string;
   name: string;
   title: string;
+  archetype: DemonArchetype;
+  attackDamage: number;
+  moveSpeed: number;
+  state: DemonCombatState;
+  stateTimer: number;
   group: THREE.Group;
   bodyGroup: THREE.Group;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
+  slashArcMesh: THREE.Mesh;
+  telegraphRingMesh: THREE.Mesh;
+  hpBarGroup: THREE.Group;
   hpBarFill: THREE.Mesh;
   postureBarFill: THREE.Mesh;
   kanjiSprite: THREE.Sprite;
@@ -75,6 +97,7 @@ export interface DemonEntity {
     run?: THREE.AnimationAction;
   };
   activeClip: 'idle' | 'walk' | 'run';
+  setClip: (clip: 'idle' | 'walk' | 'run', speed?: number) => void;
 }
 
 export interface LayoffBossEntity {
@@ -122,6 +145,14 @@ export interface RelicRig {
   baseY: number;
 }
 
+export interface WeaponForgeRig {
+  id: WeaponId;
+  group: THREE.Group;
+  weaponMesh: THREE.Group;
+  haloRing: THREE.Mesh;
+  baseY: number;
+}
+
 export interface ParticleBurstPool {
   mesh: THREE.InstancedMesh;
   spawnBurst: (x: number, y: number, z: number, count?: number, isGold?: boolean) => void;
@@ -133,6 +164,7 @@ export interface AncientWorldScene {
   playerRig: PlayerRig;
   monumentRigs: Map<string, MonumentRig>;
   relicRigs: Map<string, RelicRig>;
+  weaponForgeRigs: Map<WeaponId, WeaponForgeRig>;
   demons: DemonEntity[];
   layoffBoss: LayoffBossEntity;
   cameraBlockers: THREE.Object3D[];
@@ -147,7 +179,17 @@ export interface AncientWorldScene {
     endY?: number,
     endZ?: number
   ) => void;
-  updatePlayerPowerVisuals: (unlockedCount: number, colorHex: string) => void;
+  updateGuidanceTrail: (
+    active: boolean,
+    playerX?: number,
+    playerZ?: number,
+    targetX?: number,
+    targetZ?: number,
+    colorHex?: string,
+    elapsed?: number
+  ) => void;
+  updateShadowCamera: (playerX: number, playerZ: number) => void;
+  updatePlayerPowerVisuals: (unlockedCount: number, colorHex: string, equippedWeaponId?: WeaponId) => void;
   applyTimeOfDay: (mode: TimeOfDay) => void;
   updateWorldAnimations: (
     elapsed: number,
@@ -357,24 +399,12 @@ function createPlayerCharacter(): PlayerRig {
   const fallbackHeroGroup = new THREE.Group();
   bodyGroup.add(fallbackHeroGroup);
 
-  const skinMat = new THREE.MeshStandardMaterial({
-    color: 0xc68652,
-    roughness: 0.45,
-    metalness: 0.08,
-  });
-  const royalTunicMat = new THREE.MeshPhysicalMaterial({
-    color: 0x0f172a,
+  const armorSlateMat = new THREE.MeshStandardMaterial({
+    color: 0x1e2532,
     roughness: 0.28,
-    metalness: 0.45,
-    sheen: 0.85,
-    sheenColor: new THREE.Color(0x38bdf8),
-  });
-  const dhotiMat = new THREE.MeshPhysicalMaterial({
-    color: 0xd97706,
-    roughness: 0.38,
-    metalness: 0.2,
-    sheen: 0.75,
-    sheenColor: new THREE.Color(0xfde68a),
+    metalness: 0.72,
+    emissive: 0x0b1120,
+    emissiveIntensity: 0.16,
   });
   const capeMat = new THREE.MeshPhysicalMaterial({
     color: 0x881337,
@@ -393,131 +423,282 @@ function createPlayerCharacter(): PlayerRig {
   });
   const obsidianLacquerMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
-    roughness: 0.2,
+    roughness: 0.22,
     metalness: 0.85,
   });
 
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.19, 0.66, 16), royalTunicMat);
-  torso.position.y = 0.98;
+  // Sculpted Dark-Obsidian & Burnished Gold Shinobi Fallback Silhouette (Matches Soldier.glb armor!)
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.62, 12), armorSlateMat);
+  torso.position.y = 1.02;
   torso.castShadow = true;
   fallbackHeroGroup.add(torso);
 
-  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.28), goldMat);
-  chestPlate.position.set(0, 1.05, 0.03);
+  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.38, 0.26), obsidianLacquerMat);
+  chestPlate.position.set(0, 1.08, 0);
   fallbackHeroGroup.add(chestPlate);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 18, 16), skinMat);
+  const spineTrim = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.36, 0.28), goldMat);
+  spineTrim.position.set(0, 1.08, 0);
+  fallbackHeroGroup.add(spineTrim);
+
+  const waistBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.195, 0.1, 12), goldMat);
+  waistBelt.position.y = 0.74;
+  fallbackHeroGroup.add(waistBelt);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 16, 14), obsidianLacquerMat);
+  head.scale.set(0.92, 1.08, 1.02);
   head.position.y = 1.54;
   head.castShadow = true;
   fallbackHeroGroup.add(head);
 
-  const mukutaBase = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.19, 0.15, 16), goldMat);
-  mukutaBase.position.y = 1.68;
-  fallbackHeroGroup.add(mukutaBase);
+  const visorBand = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.055, 0.22), goldMat);
+  visorBand.position.set(0, 1.55, 0.06);
+  fallbackHeroGroup.add(visorBand);
 
-  const mukutaSpire = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.3, 12), goldMat);
-  mukutaSpire.position.y = 1.88;
-  fallbackHeroGroup.add(mukutaSpire);
+  const helmetCrest = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.24), goldMat);
+  helmetCrest.position.set(0, 1.68, 0);
+  fallbackHeroGroup.add(helmetCrest);
 
-  // Royal Sthapati Shoulder Pauldrons for procedural fallback hero
+  // Sculpted Obsidian & Gold Shoulder Pauldrons for fallback hero
   for (const side of [-1, 1]) {
     const pauldronGrp = new THREE.Group();
-    pauldronGrp.position.set(side * 0.28, 1.36, 0.02);
-    pauldronGrp.rotation.z = side * -0.32;
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.26), obsidianLacquerMat);
-    const rim = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.28), goldMat);
+    pauldronGrp.position.set(side * 0.26, 1.32, 0);
+    pauldronGrp.rotation.z = side * -0.26;
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.24), obsidianLacquerMat);
+    const rim = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.028, 0.26), goldMat);
     rim.position.y = -0.03;
     pauldronGrp.add(plate, rim);
     fallbackHeroGroup.add(pauldronGrp);
   }
 
-  // Sacred Prabhamandala Golden Back-Halo floating behind upper back
+  // Keep legacy references hidden so there is NO spinning back wheel and NO flat rectangular cape!
   const chakraHaloGroup = new THREE.Group();
-  chakraHaloGroup.position.set(0, 1.48, 0.24);
-  const haloOuter = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.014, 10, 32), goldMat);
-  chakraHaloGroup.add(haloOuter);
-  for (let s = 0; s < 8; s++) {
-    const a = (s / 8) * Math.PI * 2;
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.08, 6), goldMat);
-    fin.position.set(Math.cos(a) * 0.38, Math.sin(a) * 0.38, 0);
-    fin.rotation.z = a - Math.PI / 2;
-    chakraHaloGroup.add(fin);
-  }
-  bodyGroup.add(chakraHaloGroup);
+  chakraHaloGroup.visible = false;
 
-  // Flowing Royal Silk Mantle for procedural fallback hero
-  const cloakMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.98, 6, 8), capeMat);
-  cloakMesh.position.set(0, 0.98, 0.21);
-  cloakMesh.rotation.x = 0.16;
-  cloakMesh.castShadow = true;
-  bodyGroup.add(cloakMesh);
+  const cloakMesh = new THREE.Mesh(new THREE.BufferGeometry(), capeMat);
+  cloakMesh.visible = false;
 
-  // Left-Hip Lacquered Katana Saya (Scabbard)
+  // Sleek Left-Hip Lacquered Katana Saya (Scabbard) tucked flush at the left waist
   const scabbardGrp = new THREE.Group();
-  scabbardGrp.position.set(-0.22, 0.88, 0.05);
-  scabbardGrp.rotation.set(0.55, 0.1, 0.15);
-  const sayaBody = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.018, 0.95, 8), obsidianLacquerMat);
-  const sayaKojiri = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.02, 0.12, 8), goldMat);
-  sayaKojiri.position.y = -0.44;
-  scabbardGrp.add(sayaBody, sayaKojiri);
+  scabbardGrp.position.set(0.19, 0.88, -0.02);
+  scabbardGrp.rotation.set(-0.62, -0.06, -0.08);
+  const sayaBody = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.015, 0.88, 10), obsidianLacquerMat);
+  const sayaKurikata = new THREE.Mesh(new THREE.TorusGeometry(0.023, 0.005, 8, 14), goldMat);
+  sayaKurikata.rotation.x = Math.PI / 2;
+  sayaKurikata.position.y = 0.22;
+  const sayaKojiri = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.016, 0.1, 10), goldMat);
+  sayaKojiri.position.y = -0.41;
+  scabbardGrp.add(sayaBody, sayaKurikata, sayaKojiri);
   bodyGroup.add(scabbardGrp);
 
   const leftLeg = new THREE.Group();
-  leftLeg.position.set(-0.12, 0.65, 0);
-  const leftLegMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.42, 8, 12), dhotiMat);
+  leftLeg.position.set(0.11, 0.65, 0);
+  const leftLegMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.44, 8, 12), armorSlateMat);
   leftLegMesh.position.y = -0.25;
   leftLeg.add(leftLegMesh);
   fallbackHeroGroup.add(leftLeg);
 
   const rightLeg = new THREE.Group();
-  rightLeg.position.set(0.12, 0.65, 0);
-  const rightLegMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.42, 8, 12), dhotiMat);
+  rightLeg.position.set(-0.11, 0.65, 0);
+  const rightLegMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.44, 8, 12), armorSlateMat);
   rightLegMesh.position.y = -0.25;
   rightLeg.add(rightLegMesh);
   fallbackHeroGroup.add(rightLeg);
 
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.3, 1.24, 0);
-  const leftArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.36, 8, 12), skinMat);
+  leftArm.position.set(0.28, 1.24, 0);
+  const leftArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.36, 8, 12), armorSlateMat);
   leftArmMesh.position.y = -0.18;
   leftArm.add(leftArmMesh);
   fallbackHeroGroup.add(leftArm);
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.32, 1.22, 0);
-  const rightArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.36, 8, 12), skinMat);
+  rightArm.position.set(-0.28, 1.22, 0);
+  const rightArmMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.36, 8, 12), armorSlateMat);
   rightArmMesh.position.y = -0.18;
   rightArm.add(rightArmMesh);
   fallbackHeroGroup.add(rightArm);
 
+  // Clean Hand-Tracked Multi-Weapon Rig (No floating cylinder tubes outside the body!)
+  // When Soldier.glb loads, weaponArmPivot tracks the exact 3D palm of Soldier.glb's RightHand bone!
+  const weaponArmPivot = new THREE.Group();
+  weaponArmPivot.position.set(-0.28, 0.88, -0.06);
+  bodyGroup.add(weaponArmPivot);
+
+  const elbowJoint = new THREE.Group();
+  weaponArmPivot.add(elbowJoint);
+
+  const wristGrip = new THREE.Group();
+  elbowJoint.add(wristGrip);
+
   const swordGroup = new THREE.Group();
-  swordGroup.position.set(0.34, 1.05, -0.15);
-  swordGroup.rotation.x = Math.PI / 2.2;
-  bodyGroup.add(swordGroup);
+  swordGroup.scale.setScalar(1.12);
+  wristGrip.add(swordGroup);
 
-  const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.038, 0.3, 10), obsidianLacquerMat);
-  swordGroup.add(hilt);
-
-  const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.048, 0), goldMat);
-  pommel.position.y = -0.16;
-  swordGroup.add(pommel);
-
-  const crossguard = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.024, 8, 16), goldMat);
-  crossguard.position.y = 0.15;
-  crossguard.rotation.x = Math.PI / 2;
-  swordGroup.add(crossguard);
+  // Off-hand Dual-Wield Scimitar Pivot (Tracks LeftHand bone when Agni Twin-Sabers are equipped)
+  const offhandArmPivot = new THREE.Group();
+  offhandArmPivot.position.set(0.28, 0.88, -0.06);
+  offhandArmPivot.visible = false;
+  bodyGroup.add(offhandArmPivot);
 
   const bladeMat = new THREE.MeshStandardMaterial({
     color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 1.65,
-    roughness: 0.08,
+    emissive: 0x0ea5e9,
+    emissiveIntensity: 2.1,
+    roughness: 0.06,
     metalness: 0.96,
   });
-  const swordBlade = new THREE.Mesh(new THREE.ConeGeometry(0.055, 1.52, 6), bladeMat);
-  swordBlade.scale.set(0.52, 1, 1.82);
-  swordBlade.position.y = 0.9;
-  swordGroup.add(swordBlade);
+
+  // Helper to build the 4 distinct 3D Weapon Meshes
+  const buildWeaponModel = (wId: WeaponId): { root: THREE.Group; primaryBlade: THREE.Mesh } => {
+    const wRoot = new THREE.Group();
+
+    const hilt = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.038, 0.38, 10),
+      obsidianLacquerMat
+    );
+    wRoot.add(hilt);
+
+    // Grip diamond wrap rings
+    for (let r = -0.12; r <= 0.12; r += 0.06) {
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.007, 6, 12), goldMat);
+      wrap.rotation.x = Math.PI / 2;
+      wrap.position.y = r;
+      wRoot.add(wrap);
+    }
+
+    const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), goldMat);
+    pommel.position.y = -0.21;
+    wRoot.add(pommel);
+
+    // Flowing crimson silk pommel tassel
+    const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.24, 6), capeMat);
+    tassel.position.set(0, -0.32, 0.03);
+    tassel.rotation.x = 0.35;
+    wRoot.add(tassel);
+
+    if (wId === 'weapon-nandaka') {
+      const lotusTsuba = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 0.032, 8), goldMat);
+      lotusTsuba.position.y = 0.2;
+      wRoot.add(lotusTsuba);
+
+      const habakiCollar = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.08, 0.085), goldMat);
+      habakiCollar.position.y = 0.24;
+      wRoot.add(habakiCollar);
+
+      const katanaBlade = new THREE.Mesh(new THREE.ConeGeometry(0.058, 1.72, 6), bladeMat);
+      katanaBlade.scale.set(0.42, 1, 1.85);
+      katanaBlade.position.set(0, 1.06, -0.02);
+      katanaBlade.rotation.x = -0.04;
+      wRoot.add(katanaBlade);
+      return { root: wRoot, primaryBlade: katanaBlade };
+    }
+
+    if (wId === 'weapon-surya-greatsword') {
+      const solarGuard = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.036, 10, 20), goldMat);
+      solarGuard.position.y = 0.22;
+      wRoot.add(solarGuard);
+
+      const spineCore = new THREE.Mesh(
+        new THREE.BoxGeometry(0.048, 1.75, 0.1),
+        obsidianLacquerMat
+      );
+      spineCore.position.y = 1.08;
+      wRoot.add(spineCore);
+
+      const greatswordMat = new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 2.2,
+        roughness: 0.08,
+        metalness: 0.94,
+      });
+      const greatBlade = new THREE.Mesh(new THREE.ConeGeometry(0.11, 2.05, 6), greatswordMat);
+      greatBlade.scale.set(0.48, 1, 2.1);
+      greatBlade.position.y = 1.22;
+      wRoot.add(greatBlade);
+      return { root: wRoot, primaryBlade: greatBlade };
+    }
+
+    if (wId === 'weapon-agni-twinblades') {
+      const crescentGuard = new THREE.Mesh(
+        new THREE.TorusGeometry(0.14, 0.028, 8, 16, Math.PI * 1.2),
+        goldMat
+      );
+      crescentGuard.position.y = 0.18;
+      wRoot.add(crescentGuard);
+
+      const emeraldMat = new THREE.MeshStandardMaterial({
+        color: 0x34d399,
+        emissive: 0x10b981,
+        emissiveIntensity: 2.2,
+        roughness: 0.08,
+        metalness: 0.94,
+      });
+      const saberBlade = new THREE.Mesh(new THREE.ConeGeometry(0.072, 1.52, 6), emeraldMat);
+      saberBlade.scale.set(0.45, 1, 1.95);
+      saberBlade.position.set(0, 0.94, -0.05);
+      saberBlade.rotation.x = -0.12;
+      wRoot.add(saberBlade);
+      return { root: wRoot, primaryBlade: saberBlade };
+    }
+
+    // 'weapon-brahmastra-halberd'
+    const longShaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.028, 0.03, 1.55, 10),
+      obsidianLacquerMat
+    );
+    longShaft.position.y = 0.6;
+    wRoot.add(longShaft);
+
+    const chakraCollar = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.026, 8, 24), goldMat);
+    chakraCollar.position.y = 1.35;
+    wRoot.add(chakraCollar);
+
+    const halberdMat = new THREE.MeshStandardMaterial({
+      color: 0xf472b6,
+      emissive: 0xec4899,
+      emissiveIntensity: 2.25,
+      roughness: 0.08,
+      metalness: 0.95,
+    });
+    const spearTip = new THREE.Mesh(new THREE.ConeGeometry(0.085, 1.25, 6), halberdMat);
+    spearTip.scale.set(0.45, 1, 1.9);
+    spearTip.position.y = 1.95;
+    wRoot.add(spearTip);
+    return { root: wRoot, primaryBlade: spearTip };
+  };
+
+  const nandakaBuilt = buildWeaponModel('weapon-nandaka');
+  const suryaBuilt = buildWeaponModel('weapon-surya-greatsword');
+  const agniBuilt = buildWeaponModel('weapon-agni-twinblades');
+  const brahmastraBuilt = buildWeaponModel('weapon-brahmastra-halberd');
+
+  suryaBuilt.root.visible = false;
+  agniBuilt.root.visible = false;
+  brahmastraBuilt.root.visible = false;
+
+  swordGroup.add(
+    nandakaBuilt.root,
+    suryaBuilt.root,
+    agniBuilt.root,
+    brahmastraBuilt.root
+  );
+
+  // Build off-hand saber for dual-wielding Agni Twin-Sabers
+  const offhandSaber = buildWeaponModel('weapon-agni-twinblades').root;
+  offhandSaber.rotation.x = Math.PI * 0.42;
+  offhandSaber.position.set(-0.06, -0.28, -0.14);
+  offhandArmPivot.add(offhandSaber);
+
+  const weaponMeshes: Record<WeaponId, THREE.Group> = {
+    'weapon-nandaka': nandakaBuilt.root,
+    'weapon-surya-greatsword': suryaBuilt.root,
+    'weapon-agni-twinblades': agniBuilt.root,
+    'weapon-brahmastra-halberd': brahmastraBuilt.root,
+  };
+
+  const swordBlade = nandakaBuilt.primaryBlade;
 
   // Primary Sekiro / Zelda Katana Slash Ribbon Arc
   const slashArcGeo = new THREE.RingGeometry(1.15, 2.95, 32, 1, -Math.PI * 0.68, Math.PI * 1.36);
@@ -645,11 +826,17 @@ function createPlayerCharacter(): PlayerRig {
     rightLeg,
     leftArm,
     rightArm,
+    weaponArmPivot,
+    elbowJoint,
+    wristGrip,
+    offhandArmPivot,
     cloakMesh,
     chakraHaloGroup,
     dashRingMesh,
     swordGroup,
     swordBlade,
+    weaponMeshes,
+    equippedWeaponId: 'weapon-nandaka',
     slashArcMesh,
     comboSlashRing,
     parryShieldMesh,
@@ -657,6 +844,10 @@ function createPlayerCharacter(): PlayerRig {
     powerOrbitals,
     shadowDisc,
     glbRoot: null,
+    rightHandBone: null,
+    leftHandBone: null,
+    rightArmBone: null,
+    rightForeArmBone: null,
     mixer: null,
     actions: {},
     activeActionName: 'idle',
@@ -678,9 +869,16 @@ function createPlayerCharacter(): PlayerRig {
         currentAct.timeScale = speedMultiplier;
       }
     },
+    setEquippedWeapon(weaponId: WeaponId) {
+      this.equippedWeaponId = weaponId;
+      (Object.keys(this.weaponMeshes) as WeaponId[]).forEach((k) => {
+        this.weaponMeshes[k].visible = k === weaponId;
+      });
+      this.offhandArmPivot.visible = weaponId === 'weapon-agni-twinblades';
+    },
   };
 
-  // Load real rigged 3D character `Soldier.glb` and outfit with Sthapati Royal Armor
+  // Load real rigged 3D character `Soldier.glb`, apply Dark-Obsidian & Burnished Gold Shinobi Armor, and bind hand bones
   const loader = new GLTFLoader();
   loader.load(
     'https://threejs.org/examples/models/gltf/Soldier.glb',
@@ -689,23 +887,43 @@ function createPlayerCharacter(): PlayerRig {
       model.scale.setScalar(1.08);
       model.rotation.y = Math.PI;
       model.traverse((child) => {
+        if (child.name === 'mixamorigRightHand' || /RightHand$/i.test(child.name)) {
+          rig.rightHandBone = child;
+        } else if (child.name === 'mixamorigLeftHand' || /LeftHand$/i.test(child.name)) {
+          rig.leftHandBone = child;
+        } else if (child.name === 'mixamorigRightArm' || /RightArm$/i.test(child.name)) {
+          rig.rightArmBone = child;
+        } else if (child.name === 'mixamorigRightForeArm' || /RightForeArm$/i.test(child.name)) {
+          rig.rightForeArmBone = child;
+        }
+
         if ((child as THREE.Mesh).isMesh) {
           const m = child as THREE.Mesh;
           m.castShadow = true;
           m.receiveShadow = true;
           if (m.material instanceof THREE.MeshStandardMaterial) {
             const mat = m.material.clone();
-            mat.metalness = 0.48;
-            mat.roughness = 0.32;
-            mat.emissive = new THREE.Color(0x1e1b4b);
-            mat.emissiveIntensity = 0.24;
+            const isVisor = /visor/i.test(m.name);
+            if (isVisor) {
+              mat.color = new THREE.Color(0xfbbf24);
+              mat.emissive = new THREE.Color(0xd97706);
+              mat.emissiveIntensity = 0.65;
+              mat.metalness = 0.92;
+              mat.roughness = 0.14;
+            } else {
+              // Crisp Steel-Obsidian & Burnished Sovereign Bronze-Slate finish while preserving normal/AO detail
+              mat.color = new THREE.Color(0x526077);
+              mat.metalness = 0.66;
+              mat.roughness = 0.26;
+              mat.emissive = new THREE.Color(0x162033);
+              mat.emissiveIntensity = 0.22;
+            }
             m.material = mat;
           }
         }
       });
 
       fallbackHeroGroup.visible = false;
-      cloakMesh.visible = false;
       bodyGroup.add(model);
       rig.glbRoot = model;
 
@@ -730,7 +948,8 @@ function createPlayerCharacter(): PlayerRig {
 }
 
 /**
- * Builds an Asura Demon Enemy Rig with Vitality Bar, Sekiro Posture Bar, and Perilous Kanji Warning
+ * Builds an Asura Demon Enemy Rig with Framed Vitality Bar, Sekiro Posture Bar, Ground Telegraph Ring,
+ * Active Crimson Slash Ribbon, and Perilous Kanji Warning
  */
 function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEntity {
   const group = new THREE.Group();
@@ -749,14 +968,14 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
   const glowMat = new THREE.MeshStandardMaterial({
     color: config.colorHex,
     emissive: config.colorHex,
-    emissiveIntensity: 1.55,
+    emissiveIntensity: 1.65,
     roughness: 0.18,
     metalness: 0.55,
   });
   const hornMat = new THREE.MeshStandardMaterial({
     color: 0xfef08a,
     emissive: config.colorHex,
-    emissiveIntensity: 0.6,
+    emissiveIntensity: 0.65,
     roughness: 0.2,
     metalness: 0.88,
   });
@@ -772,69 +991,128 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
 
   const coreGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), glowMat);
   coreGem.position.set(0, 1.28, 0.24);
-  bodyGroup.add(coreGem);
+  fallbackCore.add(coreGem);
 
   const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), armorMat);
   head.position.y = 1.72;
   fallbackCore.add(head);
 
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 0.22), glowMat);
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.2), glowMat);
   visor.position.set(0, 1.66, 0.16);
-  bodyGroup.add(visor);
+  fallbackCore.add(visor);
 
-  const leftHorn = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.44, 8), hornMat);
-  leftHorn.position.set(-0.18, 1.96, 0);
-  leftHorn.rotation.z = 0.38;
-  bodyGroup.add(leftHorn);
+  const leftHorn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.36, 8), hornMat);
+  leftHorn.position.set(-0.16, 1.94, 0);
+  leftHorn.rotation.z = 0.35;
+  fallbackCore.add(leftHorn);
 
-  const rightHorn = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.44, 8), hornMat);
-  rightHorn.position.set(0.18, 1.96, 0);
-  rightHorn.rotation.z = -0.38;
-  bodyGroup.add(rightHorn);
+  const rightHorn = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.36, 8), hornMat);
+  rightHorn.position.set(0.16, 1.94, 0);
+  rightHorn.rotation.z = -0.35;
+  fallbackCore.add(rightHorn);
 
+  // Sleek Rakshasa War-Blades (Fallback left/right arms; when Xbot loads, rightArm holds a single sleek crimson katana!)
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.46, 1.32, 0);
-  const leftClub = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.72, 7), glowMat);
-  leftClub.position.y = -0.32;
-  leftClub.rotation.x = Math.PI;
+  leftArm.position.set(-0.42, 1.32, 0.06);
+  const leftClub = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.85, 6), glowMat);
+  leftClub.position.set(0, -0.4, 0.14);
+  leftClub.rotation.x = Math.PI * 0.72;
   leftArm.add(leftClub);
-  bodyGroup.add(leftArm);
+  fallbackCore.add(leftArm);
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.46, 1.32, 0);
-  const rightClub = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.72, 7), glowMat);
-  rightClub.position.y = -0.32;
-  rightClub.rotation.x = Math.PI;
+  rightArm.position.set(0.36, 1.12, 0.12);
+  const rightClub = new THREE.Mesh(new THREE.ConeGeometry(0.045, 1.15, 6), glowMat);
+  rightClub.scale.set(0.45, 1, 1.65);
+  rightClub.position.set(0, -0.35, 0.32);
+  rightClub.rotation.x = Math.PI * 0.68;
   rightArm.add(rightClub);
   bodyGroup.add(rightArm);
 
-  const hpBarFill = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.15, 0.13),
-    new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide })
-  );
-  hpBarFill.position.y = 2.55 * config.scale;
-  group.add(hpBarFill);
+  // Active Crimson Enemy Attack Slash Arc Ribbon
+  const demonSlashGeo = new THREE.RingGeometry(0.95, 2.35, 24, 1, -Math.PI * 0.65, Math.PI * 1.3);
+  demonSlashGeo.rotateX(-Math.PI / 2);
+  const demonSlashMat = new THREE.MeshBasicMaterial({
+    color: 0xf43f5e,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const slashArcMesh = new THREE.Mesh(demonSlashGeo, demonSlashMat);
+  slashArcMesh.position.set(0, 1.12, 0.35);
+  group.add(slashArcMesh);
 
+  // Ground Perilous Telegraph Ring (Glows under demon during windup before lunging!)
+  const teleGeo = new THREE.RingGeometry(1.1, 1.65, 32);
+  teleGeo.rotateX(-Math.PI / 2);
+  const teleMat = new THREE.MeshBasicMaterial({
+    color: 0xef4444,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const telegraphRingMesh = new THREE.Mesh(teleGeo, teleMat);
+  telegraphRingMesh.position.y = 0.05;
+  group.add(telegraphRingMesh);
+
+  // High-Contrast Billboard 3D Health & Posture Bar Group with Dark Backing Plate
+  const hpBarGroup = new THREE.Group();
+  hpBarGroup.position.y = 2.55 * config.scale;
+  group.add(hpBarGroup);
+
+  const hpBg = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.42, 0.34),
+    new THREE.MeshBasicMaterial({
+      color: 0x05070b,
+      transparent: true,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
+    })
+  );
+  hpBg.position.z = -0.01;
+  hpBarGroup.add(hpBg);
+
+  const hpFillGeo = new THREE.PlaneGeometry(1.32, 0.13);
+  hpFillGeo.translate(0.66, 0, 0); // Left-anchored so scaling X visibly shrinks from right to left!
+  const hpBarFill = new THREE.Mesh(
+    hpFillGeo,
+    new THREE.MeshBasicMaterial({ color: 0xf43f5e, side: THREE.DoubleSide })
+  );
+  hpBarFill.position.set(-0.66, 0.06, 0.01);
+  hpBarGroup.add(hpBarFill);
+
+  const postureFillGeo = new THREE.PlaneGeometry(1.32, 0.07);
+  postureFillGeo.translate(0.66, 0, 0);
   const postureBarFill = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.15, 0.08),
+    postureFillGeo,
     new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide })
   );
-  postureBarFill.position.y = 2.38 * config.scale;
-  postureBarFill.scale.x = 0.05;
-  group.add(postureBarFill);
+  postureBarFill.position.set(-0.66, -0.07, 0.01);
+  postureBarFill.scale.x = 0.04;
+  hpBarGroup.add(postureBarFill);
 
   const kanjiSprite = createKanjiWarningSprite('危');
-  kanjiSprite.position.y = 3.15 * config.scale;
+  kanjiSprite.position.y = 3.25 * config.scale;
   group.add(kanjiSprite);
 
   return {
     id: config.id,
     name: config.name,
     title: config.title,
+    archetype: config.archetype,
+    attackDamage: config.attackDamage,
+    moveSpeed: config.moveSpeed,
+    state: 'patrol',
+    stateTimer: 0,
     group,
     bodyGroup,
     leftArm,
     rightArm,
+    slashArcMesh,
+    telegraphRingMesh,
+    hpBarGroup,
     hpBarFill,
     postureBarFill,
     kanjiSprite,
@@ -847,16 +1125,30 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
     hp: config.maxHp,
     maxHp: config.maxHp,
     posture: 0,
-    maxPosture: 60,
+    maxPosture: 65,
     scale: config.scale,
     alive: true,
     hitFlashTimer: 0,
     attackCooldown: 0,
     perilousTimer: 0,
-    aggroRange: 13.5,
+    aggroRange: config.aggroRange,
     mixer: null,
     actions: {},
     activeClip: 'idle',
+    setClip(nextClip: 'idle' | 'walk' | 'run', speed = 1) {
+      if (!this.mixer) return;
+      if (this.activeClip !== nextClip) {
+        const prev = this.actions[this.activeClip];
+        const next = this.actions[nextClip];
+        if (next) {
+          next.reset().fadeIn(0.15).play();
+          if (prev && prev !== next) prev.fadeOut(0.15);
+          this.activeClip = nextClip;
+        }
+      }
+      const act = this.actions[this.activeClip];
+      if (act) act.timeScale = speed;
+    },
   };
 }
 
@@ -1076,20 +1368,57 @@ function createMonumentMesh(
     metalness: 0.86,
   });
 
-  // Multi-tiered carved Jagati Plinth with gold lotus molding
-  const baseStep1 = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 6.0, 0.48, 16), darkStoneMat);
+  // Multi-tiered carved Jagati Plinth with gold lotus molding + Walkable Front Ceremonial Staircase (Sopana)
+  const baseStep1 = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 6.0, 0.48, 24), darkStoneMat);
   baseStep1.position.y = 0.24;
   baseStep1.receiveShadow = true;
+  baseStep1.castShadow = true;
   group.add(baseStep1);
 
-  const goldMolding = new THREE.Mesh(new THREE.CylinderGeometry(4.95, 5.1, 0.14, 16), goldMat);
+  const goldMolding = new THREE.Mesh(new THREE.CylinderGeometry(4.95, 5.1, 0.14, 24), goldMat);
   goldMolding.position.y = 0.54;
   group.add(goldMolding);
 
-  const baseStep2 = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.85, 0.52, 16), stoneMat);
+  const baseStep2 = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.85, 0.52, 24), stoneMat);
   baseStep2.position.y = 0.86;
   baseStep2.receiveShadow = true;
+  baseStep2.castShadow = true;
   group.add(baseStep2);
+
+  // Walkable Front Ceremonial Staircase (Sopana) with Hastihasta Elephant-Trunk Balustrades (+Z approach)
+  for (let st = 0; st < 5; st++) {
+    const stepH = 0.22;
+    const stepY = (st + 0.5) * stepH;
+    const stepZ = 6.95 - st * 0.52;
+    const stepSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(2.75 - st * 0.08, stepH, 0.58),
+      st % 2 === 0 ? stoneMat : darkStoneMat
+    );
+    stepSlab.position.set(0, stepY, stepZ);
+    stepSlab.receiveShadow = true;
+    stepSlab.castShadow = true;
+    const stepGoldEdge = new THREE.Mesh(
+      new THREE.BoxGeometry(2.78 - st * 0.08, 0.04, 0.6),
+      goldMat
+    );
+    stepGoldEdge.position.set(0, stepY + stepH * 0.5, stepZ);
+    group.add(stepSlab, stepGoldEdge);
+  }
+
+  for (const railSide of [-1.48, 1.48]) {
+    const railWall = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.95, 2.7), darkStoneMat);
+    railWall.position.set(railSide, 0.55, 5.85);
+    railWall.rotation.x = 0.36;
+    railWall.castShadow = true;
+    const railCap = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 2.75), goldMat);
+    railCap.position.set(railSide, 1.02, 5.85);
+    railCap.rotation.x = 0.36;
+    const newelPost = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.95, 8), stoneMat);
+    newelPost.position.set(railSide, 0.48, 7.15);
+    const newelGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), emissiveMat);
+    newelGem.position.set(railSide, 1.08, 7.15);
+    group.add(railWall, railCap, newelPost, newelGem);
+  }
 
   // Corner Sacred Agni Braziers on every Sanctum Plinth
   for (let c = 0; c < 4; c++) {
@@ -1105,16 +1434,26 @@ function createMonumentMesh(
     group.add(brazierPost, brazierCup, ember);
   }
 
-  const haloGeo = new THREE.RingGeometry(5.8, 6.35, 48);
+  const haloGeo = new THREE.RingGeometry(5.85, 6.45, 64);
   haloGeo.rotateX(-Math.PI / 2);
   const haloMat = new THREE.MeshBasicMaterial({
     color: accentColor,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.76,
+    opacity: 0.82,
   });
   const haloRing = new THREE.Mesh(haloGeo, haloMat);
   haloRing.position.y = 0.08;
+  const innerMandala = new THREE.Mesh(
+    new THREE.RingGeometry(5.2, 5.45, 12).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.65,
+    })
+  );
+  haloRing.add(innerMandala);
   group.add(haloRing);
 
   // Volumetric God-Ray Sky Column
@@ -2166,10 +2505,18 @@ export function buildAncientWorldScene(
     }
   }
 
-  // Crowning Golden Dharmachakra Finial atop the Torana Gateway
-  const toranaChakra = new THREE.Mesh(new THREE.TorusGeometry(0.68, 0.08, 12, 28), goldMat);
-  toranaChakra.position.set(0, 7.75, 0);
-  toranaGroup.add(toranaChakra);
+  // Traditional Carved Golden Kalasha Temple Finial atop the Grand Torana Gateway (No gyroscope rings!)
+  const toranaKalashaBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.45, 0.32, 16),
+    goldMat
+  );
+  toranaKalashaBase.position.set(0, 7.62, 0);
+  const toranaKalashaSpire = new THREE.Mesh(
+    new THREE.ConeGeometry(0.32, 0.88, 16),
+    goldMat
+  );
+  toranaKalashaSpire.position.set(0, 8.15, 0);
+  toranaGroup.add(toranaKalashaBase, toranaKalashaSpire);
   scene.add(toranaGroup);
 
   // Northern Rakshasa Boss Arena Ring at (0, -48)
@@ -2432,6 +2779,82 @@ export function buildAncientWorldScene(
     });
   }
 
+  // 9B. Build the 4 Sacred Weapon Forge Altars (Armory Pedestals where player can inspect & equip weapons)
+  const weaponForgeRigs = new Map<WeaponId, WeaponForgeRig>();
+  for (const wf of FORGE_WEAPONS) {
+    const wfGroup = new THREE.Group();
+    const baseY = groundHeightAt(wf.position.x, wf.position.z);
+    wfGroup.position.set(wf.position.x, baseY, wf.position.z);
+
+    const accentCol = new THREE.Color(wf.colorHex);
+    const wfEmissiveMat = new THREE.MeshStandardMaterial({
+      color: accentCol,
+      emissive: accentCol,
+      emissiveIntensity: 1.55,
+      roughness: 0.18,
+      metalness: 0.9,
+    });
+
+    // Stepped Anvil Pedestal (Walkable 0.65m height)
+    const stepBase = new THREE.Mesh(new THREE.CylinderGeometry(1.38, 1.58, 0.34, 16), darkStoneMat);
+    stepBase.position.y = 0.17;
+    stepBase.receiveShadow = true;
+    const anvilTop = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.15, 0.32, 16), stoneMat);
+    anvilTop.position.y = 0.49;
+    anvilTop.receiveShadow = true;
+    const goldTrim = new THREE.Mesh(new THREE.TorusGeometry(1.06, 0.05, 10, 32).rotateX(Math.PI / 2), goldMat);
+    goldTrim.position.y = 0.65;
+    wfGroup.add(stepBase, anvilTop, goldTrim);
+
+    // Ground Mandala Halo Ring
+    const wfHalo = new THREE.Mesh(
+      new THREE.RingGeometry(1.62, 1.92, 36).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: accentCol,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.82,
+      })
+    );
+    wfHalo.position.y = 0.06;
+    wfGroup.add(wfHalo);
+
+    // Floating Display Weapon Mesh above the Forge
+    const displayWeapon = new THREE.Group();
+    displayWeapon.position.y = 1.95;
+
+    if (wf.id === 'weapon-nandaka') {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.55, 0.04), wfEmissiveMat);
+      const guard = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.045, 8, 20), goldMat);
+      displayWeapon.add(blade, guard);
+    } else if (wf.id === 'weapon-surya-greatsword') {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.95, 0.06), wfEmissiveMat);
+      const sunRing = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.05, 8, 24), goldMat);
+      displayWeapon.add(blade, sunRing);
+    } else if (wf.id === 'weapon-agni-twinblades') {
+      const b1 = new THREE.Mesh(new THREE.ConeGeometry(0.12, 1.25, 4), wfEmissiveMat);
+      b1.position.x = -0.22;
+      const b2 = new THREE.Mesh(new THREE.ConeGeometry(0.12, 1.25, 4), wfEmissiveMat);
+      b2.position.x = 0.22;
+      displayWeapon.add(b1, b2);
+    } else {
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.25, 10), goldMat);
+      const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.06, 8, 20, Math.PI * 1.2), wfEmissiveMat);
+      crescent.position.y = 0.65;
+      displayWeapon.add(shaft, crescent);
+    }
+    wfGroup.add(displayWeapon);
+    scene.add(wfGroup);
+
+    weaponForgeRigs.set(wf.id, {
+      id: wf.id,
+      group: wfGroup,
+      weaponMesh: displayWeapon,
+      haloRing: wfHalo,
+      baseY,
+    });
+  }
+
   // 10. Build 6 Roaming Asura Demons + Colossal September Layoff Boss
   const demons: DemonEntity[] = [];
   for (const dConf of INITIAL_DEMON_SPAWNS) {
@@ -2674,6 +3097,80 @@ export function buildAncientWorldScene(
   const particlePool = createParticlePool(isSoftwareGl ? 80 : 140);
   scene.add(particlePool.mesh);
 
+  // 14. Golden Prana Guidance Trail (18 Animated Stepping Chevrons from Player to Tracked Objective)
+  const trailNodes = 18;
+  const trailGeo = new THREE.OctahedronGeometry(0.16, 0);
+  trailGeo.scale(1.3, 0.35, 1.8);
+  const trailMat = new THREE.MeshBasicMaterial({
+    color: 0xfef08a,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const guidanceTrailMesh = new THREE.InstancedMesh(trailGeo, trailMat, trailNodes);
+  guidanceTrailMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  guidanceTrailMesh.frustumCulled = false;
+  scene.add(guidanceTrailMesh);
+  const trailDummy = new THREE.Object3D();
+
+  function updateGuidanceTrail(
+    active: boolean,
+    playerX = 0,
+    playerZ = 0,
+    targetX = 0,
+    targetZ = 0,
+    colorHex = '#fbbf24',
+    elapsed = 0
+  ) {
+    guidanceTrailMesh.visible = active;
+    if (!active) return;
+    trailMat.color.set(colorHex);
+    const dx = targetX - playerX;
+    const dz = targetZ - playerZ;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 2.2) {
+      guidanceTrailMesh.visible = false;
+      return;
+    }
+    const dirYaw = Math.atan2(dx, dz);
+    const maxSpan = Math.min(dist - 1.5, 34);
+
+    for (let i = 0; i < trailNodes; i++) {
+      const flowPct = ((i / trailNodes) + elapsed * 0.42) % 1.0;
+      const d = 1.6 + flowPct * maxSpan;
+      const nx = playerX + (dx / dist) * d;
+      const nz = playerZ + (dz / dist) * d;
+      const ny = groundHeightAt(nx, nz) + 0.24 + Math.sin(elapsed * 4.5 + i * 0.6) * 0.08;
+      trailDummy.position.set(nx, ny, nz);
+      trailDummy.rotation.set(0, dirYaw, 0);
+      const fade = Math.sin(flowPct * Math.PI);
+      trailDummy.scale.setScalar(Math.max(0.15, fade * 1.15));
+      trailDummy.updateMatrix();
+      guidanceTrailMesh.setMatrixAt(i, trailDummy.matrix);
+    }
+    guidanceTrailMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Dynamic Shadow Frustum Following the Player for High-Resolution 2048x2048 Contact Shadows
+  const sunOffset = new THREE.Vector3(24, 42, -38);
+  function updateShadowCamera(playerX: number, playerZ: number) {
+    if (isSoftwareGl) return;
+    dirLight.position.set(playerX + sunOffset.x, sunOffset.y, playerZ + sunOffset.z);
+    dirLight.target.position.set(playerX, 0, playerZ);
+    dirLight.target.updateMatrixWorld();
+  }
+
+  if (!isSoftwareGl) {
+    const shadowExtent = 34;
+    dirLight.shadow.camera.left = -shadowExtent;
+    dirLight.shadow.camera.right = shadowExtent;
+    dirLight.shadow.camera.top = shadowExtent;
+    dirLight.shadow.camera.bottom = -shadowExtent;
+    dirLight.shadow.camera.near = 4;
+    dirLight.shadow.camera.far = 115;
+    dirLight.shadow.camera.updateProjectionMatrix();
+    scene.add(dirLight.target);
+  }
+
   function updateGrappleLine(
     active: boolean,
     startX = 0,
@@ -2691,18 +3188,25 @@ export function buildAncientWorldScene(
     pos.needsUpdate = true;
   }
 
-  function updatePlayerPowerVisuals(unlockedCount: number, colorHex: string) {
-    const col = new THREE.Color(colorHex);
+  function updatePlayerPowerVisuals(
+    unlockedCount: number,
+    colorHex: string,
+    equippedWeaponId: WeaponId = 'weapon-nandaka'
+  ) {
+    playerRig.setEquippedWeapon(equippedWeaponId);
+    const weaponConf = FORGE_WEAPONS.find((w) => w.id === equippedWeaponId);
+    const col = new THREE.Color(weaponConf ? weaponConf.colorHex : colorHex);
+
     if (playerRig.swordBlade.material instanceof THREE.MeshStandardMaterial) {
       playerRig.swordBlade.material.color.copy(col);
       playerRig.swordBlade.material.emissive.copy(col);
-      playerRig.swordBlade.material.emissiveIntensity = 1.35 + unlockedCount * 0.28;
+      playerRig.swordBlade.material.emissiveIntensity = 1.45 + unlockedCount * 0.25;
     }
     if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
       playerRig.slashArcMesh.material.color.copy(col);
     }
-    const scaleBoost = 1 + unlockedCount * 0.12;
-    playerRig.swordBlade.scale.set(0.52 * scaleBoost, scaleBoost, 1.82 * scaleBoost);
+    const scaleBoost = 1 + unlockedCount * 0.08;
+    playerRig.swordGroup.scale.setScalar(scaleBoost);
     playerRig.chakraHaloGroup.scale.setScalar(0.85 + unlockedCount * 0.08);
 
     for (let i = 0; i < playerRig.powerOrbitals.length; i++) {
@@ -2787,7 +3291,6 @@ export function buildAncientWorldScene(
     skyUniforms.uTime.value = elapsed;
     windGrass.uniforms.uTime.value = elapsed;
     zeldaRiver.uniforms.uTime.value = elapsed;
-    toranaChakra.rotation.z = -elapsed * 0.9;
 
     for (let b = 0; b < silkBanners.length; b++) {
       silkBanners[b].rotation.z = Math.sin(elapsed * 2.4 + b * 1.5) * 0.08;
@@ -2816,7 +3319,7 @@ export function buildAncientWorldScene(
     }
     fireflyMesh.instanceMatrix.needsUpdate = true;
 
-    // 2. Update Player Skeletal Animation Mixer, Prabhamandala Halo, Dash Ring, Paraglider & 3-Stage Combo
+    // 2. Update Player Skeletal Animation Mixer, Hand-Locked Weapon Tracking & 6-DOF Combat Kinematics
     if (playerRig.mixer) {
       const animState: 'idle' | 'walk' | 'run' =
         playerMoveSpeed > 9.0 ? 'run' : playerMoveSpeed > 0.3 ? 'walk' : 'idle';
@@ -2828,9 +3331,48 @@ export function buildAncientWorldScene(
           : 1.0;
       playerRig.setAnimationState(animState, clipSpeed);
       playerRig.mixer.update(dt);
-    }
 
-    playerRig.chakraHaloGroup.rotation.z = elapsed * 0.85;
+      // Apply skeletal right-arm combat overrides during attacks or Sekiro parry before sampling hand bone world position
+      if (playerRig.rightArmBone && playerRig.rightForeArmBone) {
+        if (attackProgress > 0) {
+          const sinSwing = Math.sin(attackProgress * Math.PI);
+          const easeSwing = 1 - Math.pow(1 - attackProgress, 2.2);
+          if (comboStage === 1) {
+            playerRig.rightArmBone.rotation.x += -0.65 + easeSwing * 1.15;
+            playerRig.rightArmBone.rotation.z += -0.35 + easeSwing * 0.55;
+            playerRig.rightForeArmBone.rotation.x += -0.45 + sinSwing * 0.4;
+          } else if (comboStage === 2) {
+            playerRig.rightArmBone.rotation.x += 0.35 - easeSwing * 1.05;
+            playerRig.rightArmBone.rotation.z += 0.25 - easeSwing * 0.65;
+            playerRig.rightForeArmBone.rotation.x += -0.35;
+          } else {
+            playerRig.rightArmBone.rotation.z += -0.65;
+            playerRig.rightForeArmBone.rotation.x += -0.2;
+          }
+        } else if (isParrying) {
+          playerRig.rightArmBone.rotation.x += -0.65;
+          playerRig.rightArmBone.rotation.y += 0.45;
+          playerRig.rightForeArmBone.rotation.x += -0.75;
+        }
+      }
+
+      // Lock weaponArmPivot and offhandArmPivot directly to Soldier.glb's actual 3D hand palms!
+      if (playerRig.glbRoot && playerRig.rightHandBone) {
+        playerRig.glbRoot.updateMatrixWorld(true);
+        const handWorld = new THREE.Vector3();
+        playerRig.rightHandBone.getWorldPosition(handWorld);
+        playerRig.bodyGroup.worldToLocal(handWorld);
+        playerRig.weaponArmPivot.position.copy(handWorld);
+        playerRig.elbowJoint.position.set(0, 0, 0);
+        playerRig.wristGrip.position.set(0, 0, 0);
+      }
+      if (playerRig.glbRoot && playerRig.leftHandBone) {
+        const leftWorld = new THREE.Vector3();
+        playerRig.leftHandBone.getWorldPosition(leftWorld);
+        playerRig.bodyGroup.worldToLocal(leftWorld);
+        playerRig.offhandArmPivot.position.copy(leftWorld);
+      }
+    }
 
     if (playerRig.dashRingMesh.material instanceof THREE.MeshBasicMaterial) {
       playerRig.dashRingMesh.material.opacity = isDashing ? 0.82 : 0;
@@ -2864,60 +3406,135 @@ export function buildAncientWorldScene(
       orb.rotation.x = elapsed * 2;
     }
 
-    // 3-Stage Sekiro / Zelda Katana Combo Animatics (Diagonal Cleave -> Cross-Slash -> Whirlwind Spin)
+    // Smooth Damped 6-DOF Articulated Sword & Arm Kinematics (Never stuck/rigid!)
+    const damp = (cur: number, target: number, lambda: number) =>
+      THREE.MathUtils.lerp(cur, target, 1 - Math.exp(-lambda * Math.max(0.001, dt)));
+
     if (attackProgress > 0) {
       const sinSwing = Math.sin(attackProgress * Math.PI);
+      const easeSwing = 1 - Math.pow(1 - attackProgress, 2.2);
+
       if (comboStage === 1) {
-        // Stage 1: Horizontal-diagonal cleave + forward torso lean
-        playerRig.bodyGroup.rotation.y = sinSwing * 0.42;
-        playerRig.bodyGroup.rotation.x = sinSwing * 0.18;
-        playerRig.rightArm.rotation.x = -1.4 + sinSwing * 2.1;
-        playerRig.swordGroup.rotation.y = -1.25 + attackProgress * 2.5;
-        playerRig.slashArcMesh.rotation.set(0, attackProgress * Math.PI * 1.65, 0.18);
-        playerRig.slashArcMesh.scale.setScalar(0.9 + attackProgress * 0.55);
+        // Stage 1: Diagonal Right-to-Left High-to-Low Cleave with Shoulder Extension & Wrist Snap
+        playerRig.bodyGroup.rotation.y = damp(playerRig.bodyGroup.rotation.y, 0.52 - easeSwing * 1.15, 24);
+        playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, sinSwing * 0.22, 24);
+
+        playerRig.weaponArmPivot.rotation.set(
+          -0.95 + easeSwing * 1.65,
+          0.65 - easeSwing * 1.45,
+          -0.45 + easeSwing * 0.85
+        );
+        playerRig.elbowJoint.rotation.set(-0.65 + sinSwing * 0.52, 0, 0);
+        playerRig.wristGrip.rotation.set(0.35 + easeSwing * 1.05, -0.3 + easeSwing * 0.65, 0.25);
+
+        playerRig.slashArcMesh.rotation.set(0.22, -0.9 + easeSwing * Math.PI * 1.55, 0.28);
+        playerRig.slashArcMesh.scale.setScalar(0.95 + easeSwing * 0.55);
         if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
-          playerRig.slashArcMesh.material.opacity = sinSwing * 0.9;
+          playerRig.slashArcMesh.material.opacity = sinSwing * 0.92;
         }
         if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
           playerRig.comboSlashRing.material.opacity = 0;
         }
       } else if (comboStage === 2) {
-        // Stage 2: Reverse ascending cross-slash + dual ribbons
-        playerRig.bodyGroup.rotation.y = -sinSwing * 0.48;
-        playerRig.bodyGroup.rotation.x = sinSwing * 0.22;
-        playerRig.rightArm.rotation.x = -1.55 + sinSwing * 2.3;
-        playerRig.swordGroup.rotation.y = 1.35 - attackProgress * 2.7;
-        playerRig.slashArcMesh.rotation.set(0, -attackProgress * Math.PI * 1.75, -0.36);
-        playerRig.slashArcMesh.scale.setScalar(0.95 + attackProgress * 0.65);
+        // Stage 2: Reverse Ascending Left-to-Right Cross-Slash + Dual Agni Offhand Sweep
+        playerRig.bodyGroup.rotation.y = damp(playerRig.bodyGroup.rotation.y, -0.58 + easeSwing * 1.25, 24);
+        playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, sinSwing * 0.25, 24);
+
+        playerRig.weaponArmPivot.rotation.set(
+          0.55 - easeSwing * 1.55,
+          -0.75 + easeSwing * 1.55,
+          0.42 - easeSwing * 0.92
+        );
+        playerRig.elbowJoint.rotation.set(-0.35 - sinSwing * 0.35, 0, 0);
+        playerRig.wristGrip.rotation.set(1.15 - easeSwing * 0.85, 0.45 - easeSwing * 0.9, -0.35);
+
+        playerRig.offhandArmPivot.rotation.set(-0.85 + sinSwing * 1.6, 0.55 - easeSwing * 1.2, 0.3);
+
+        playerRig.slashArcMesh.rotation.set(-0.24, 0.95 - easeSwing * Math.PI * 1.65, -0.36);
+        playerRig.slashArcMesh.scale.setScalar(1.0 + easeSwing * 0.65);
         if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
-          playerRig.slashArcMesh.material.opacity = sinSwing * 0.92;
+          playerRig.slashArcMesh.material.opacity = sinSwing * 0.94;
         }
-        playerRig.comboSlashRing.rotation.set(0.28, attackProgress * Math.PI * 1.5, 0.35);
-        playerRig.comboSlashRing.scale.setScalar(0.85 + attackProgress * 0.6);
+        playerRig.comboSlashRing.rotation.set(0.28, easeSwing * Math.PI * 1.5, 0.35);
+        playerRig.comboSlashRing.scale.setScalar(0.88 + easeSwing * 0.62);
         if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
-          playerRig.comboSlashRing.material.opacity = sinSwing * 0.78;
+          playerRig.comboSlashRing.material.opacity = sinSwing * 0.82;
         }
       } else {
-        // Stage 3: 360° Surya Whirlwind Finisher + blazing double rings
-        playerRig.bodyGroup.rotation.y = attackProgress * Math.PI * 2;
-        playerRig.bodyGroup.rotation.x = sinSwing * 0.26;
-        playerRig.rightArm.rotation.x = -1.6 + sinSwing * 2.4;
-        playerRig.swordGroup.rotation.y = -1.5 + attackProgress * 3.2;
-        playerRig.slashArcMesh.rotation.set(0, attackProgress * Math.PI * 2.4, 0.22);
-        playerRig.slashArcMesh.scale.setScalar(1.1 + attackProgress * 0.75);
+        // Stage 3: 360° Surya Whirlwind Finisher with Full Extended Blade Sweep
+        playerRig.bodyGroup.rotation.y = easeSwing * Math.PI * 2;
+        playerRig.bodyGroup.rotation.x = sinSwing * 0.28;
+
+        playerRig.weaponArmPivot.rotation.set(-0.25, -0.85 + easeSwing * 1.9, -1.15);
+        playerRig.elbowJoint.rotation.set(-0.12, 0, 0);
+        playerRig.wristGrip.rotation.set(1.38, 0, -0.45);
+        playerRig.offhandArmPivot.rotation.set(-0.3, 0.85 - easeSwing * 1.8, 1.05);
+
+        playerRig.slashArcMesh.rotation.set(0, easeSwing * Math.PI * 2.4, 0.14);
+        playerRig.slashArcMesh.scale.setScalar(1.15 + easeSwing * 0.78);
         if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
           playerRig.slashArcMesh.material.opacity = sinSwing * 0.96;
         }
-        playerRig.comboSlashRing.rotation.set(-0.22, -attackProgress * Math.PI * 2.2, -0.25);
-        playerRig.comboSlashRing.scale.setScalar(1.05 + attackProgress * 0.85);
+        playerRig.comboSlashRing.rotation.set(-0.22, -easeSwing * Math.PI * 2.2, -0.25);
+        playerRig.comboSlashRing.scale.setScalar(1.08 + easeSwing * 0.88);
         if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
-          playerRig.comboSlashRing.material.opacity = sinSwing * 0.92;
+          playerRig.comboSlashRing.material.opacity = sinSwing * 0.94;
         }
       }
+    } else if (isParrying) {
+      // Defensive Sekiro High-Guard Cross-Body Parry Stance
+      playerRig.bodyGroup.rotation.y = damp(playerRig.bodyGroup.rotation.y, -0.28, 18);
+      playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, 0.08, 18);
+      playerRig.weaponArmPivot.rotation.x = damp(playerRig.weaponArmPivot.rotation.x, -0.92, 20);
+      playerRig.weaponArmPivot.rotation.y = damp(playerRig.weaponArmPivot.rotation.y, 0.62, 20);
+      playerRig.weaponArmPivot.rotation.z = damp(playerRig.weaponArmPivot.rotation.z, 0.48, 20);
+      playerRig.elbowJoint.rotation.x = damp(playerRig.elbowJoint.rotation.x, -0.88, 20);
+      playerRig.wristGrip.rotation.set(
+        damp(playerRig.wristGrip.rotation.x, 0.18, 20),
+        damp(playerRig.wristGrip.rotation.y, 0.35, 20),
+        damp(playerRig.wristGrip.rotation.z, 0.95, 20)
+      );
+      if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
+        playerRig.slashArcMesh.material.opacity = 0;
+      }
+      if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
+        playerRig.comboSlashRing.material.opacity = 0;
+      }
     } else {
-      playerRig.bodyGroup.rotation.y = 0;
-      playerRig.bodyGroup.rotation.x = 0;
-      playerRig.swordGroup.rotation.y = 0;
+      // Fluid Idle Breathing Stance vs Dynamic Low-Swept Shinobi Sprint Carry (Blade clearly silhouetted to the right!)
+      const speedFactor = THREE.MathUtils.clamp(playerMoveSpeed / 10.5, 0, 1);
+      const strideBob = Math.sin(elapsed * (3.2 + speedFactor * 8.5));
+      const breathWave = Math.sin(elapsed * 2.4);
+
+      playerRig.bodyGroup.rotation.y = damp(playerRig.bodyGroup.rotation.y, strideBob * 0.06 * speedFactor, 14);
+      playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, speedFactor * 0.14, 14);
+
+      const targetShoulderX = THREE.MathUtils.lerp(0.22 + breathWave * 0.05, -0.28 + strideBob * 0.16, speedFactor);
+      const targetShoulderY = THREE.MathUtils.lerp(0.14, 0.35, speedFactor);
+      const targetShoulderZ = THREE.MathUtils.lerp(0.56 + breathWave * 0.04, 0.82, speedFactor);
+
+      playerRig.weaponArmPivot.rotation.x = damp(playerRig.weaponArmPivot.rotation.x, targetShoulderX, 14);
+      playerRig.weaponArmPivot.rotation.y = damp(playerRig.weaponArmPivot.rotation.y, targetShoulderY, 14);
+      playerRig.weaponArmPivot.rotation.z = damp(playerRig.weaponArmPivot.rotation.z, targetShoulderZ, 14);
+
+      const targetElbowX = THREE.MathUtils.lerp(0.18 + breathWave * 0.04, 0.12 + strideBob * 0.12, speedFactor);
+      playerRig.elbowJoint.rotation.x = damp(playerRig.elbowJoint.rotation.x, targetElbowX, 14);
+
+      const targetWristX = THREE.MathUtils.lerp(0.28, -0.35, speedFactor);
+      const targetWristY = THREE.MathUtils.lerp(-0.18, -0.28, speedFactor);
+      const targetWristZ = THREE.MathUtils.lerp(0.46, 0.68, speedFactor);
+      playerRig.wristGrip.rotation.set(
+        damp(playerRig.wristGrip.rotation.x, targetWristX, 14),
+        damp(playerRig.wristGrip.rotation.y, targetWristY, 14),
+        damp(playerRig.wristGrip.rotation.z, targetWristZ, 14)
+      );
+
+      playerRig.offhandArmPivot.rotation.set(
+        damp(playerRig.offhandArmPivot.rotation.x, 0.15 - strideBob * 0.25 * speedFactor, 14),
+        damp(playerRig.offhandArmPivot.rotation.y, -0.22, 14),
+        damp(playerRig.offhandArmPivot.rotation.z, -0.58, 14)
+      );
+
       if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
         playerRig.slashArcMesh.material.opacity = 0;
       }
@@ -2932,7 +3549,6 @@ export function buildAncientWorldScene(
     }
 
     if (hypoBotGroup) {
-      // Keep Hypo firmly grounded on his stone plinth and smoothly turn toward the player
       hypoBotGroup.position.y = hypoFloorY + 0.26;
       const dxToPlayer = playerRig.group.position.x - hypoBaseX;
       const dzToPlayer = playerRig.group.position.z - hypoBaseZ;
@@ -2947,7 +3563,6 @@ export function buildAncientWorldScene(
       const fz = fox.centerZ + Math.sin(fa) * fox.radius;
       const fy = groundHeightAt(fx, fz) + fox.footOffsetY - 0.03;
 
-      // Exact velocity tangent vector along the circular meadow path so the fox faces forward along its stride
       const nextFa = fa + 0.05;
       const nextFx = fox.centerX + Math.cos(nextFa) * fox.radius;
       const nextFz = fox.centerZ + Math.sin(nextFa) * fox.radius;
@@ -2991,11 +3606,17 @@ export function buildAncientWorldScene(
       rig.haloRing.scale.setScalar(pulse);
     });
 
-    // 5. Update Lotus Relics
+    // 5. Update Lotus Relics & Weapon Forge Altars
     relicRigs.forEach((rig) => {
       if (!rig.group.visible) return;
       rig.mesh.rotation.y = elapsed * 1.7;
       rig.mesh.position.y = 1.18 + Math.sin(elapsed * 2.8 + rig.baseY) * 0.14;
+    });
+
+    weaponForgeRigs.forEach((wf) => {
+      wf.weaponMesh.rotation.y = elapsed * 1.45;
+      wf.weaponMesh.position.y = 1.95 + Math.sin(elapsed * 2.6 + wf.baseY) * 0.16;
+      wf.haloRing.rotation.z = elapsed * 0.75;
     });
 
     particlePool.update(dt);
@@ -3022,12 +3643,15 @@ export function buildAncientWorldScene(
     playerRig,
     monumentRigs,
     relicRigs,
+    weaponForgeRigs,
     demons,
     layoffBoss,
     cameraBlockers,
     particlePool,
     grappleLine,
     updateGrappleLine,
+    updateGuidanceTrail,
+    updateShadowCamera,
     updatePlayerPowerVisuals,
     applyTimeOfDay,
     updateWorldAnimations,

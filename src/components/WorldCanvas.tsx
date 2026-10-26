@@ -5,23 +5,27 @@ import {
   PORTFOLIO_STOPS,
   LOTUS_RELICS,
   STORY_CHAPTERS,
+  FORGE_WEAPONS,
   LotusRelic,
+  WeaponId,
 } from '../data/portfolioStops';
 import {
   groundHeightAt,
+  walkableSurfaceHeightAt,
   applyRadialDeadzone,
   computeMovementVector,
   computeParagliderPhysics,
   findBestGrappleTarget,
-  resolveSekiroDeflect,
   resolveCombatDefense,
   computeDynamicCameraFov,
   computeComboRank,
   dampAngle,
   resolveCollisions,
   findNearestStop,
+  findNearestWeaponForge,
   checkRelicPickup,
   computePlayerCombatStats,
+  stepDemonCombatAI,
   shouldAwakenLayoffBoss,
   getWorldColliders,
   getRegionNameAt,
@@ -30,10 +34,18 @@ import {
 } from '../game/worldLogic';
 import { buildAncientWorldScene, TimeOfDay } from '../game/proceduralScene';
 import { sound } from '../game/sound';
-import { HudTelemetry, CombatFloatingPopup } from './HudOverlay';
+import {
+  HudTelemetry,
+  CombatFloatingPopup,
+  WorldAffordanceMarker,
+  EngagedDemonTelemetry,
+} from './HudOverlay';
 
 export interface WorldControllerRef {
   teleportToStop: (stopId: string) => void;
+  teleportToPoint: (x: number, z: number, label?: string) => void;
+  equipWeapon: (weaponId: WeaponId) => void;
+  setGuidanceTarget: (id: string, kind: 'project' | 'jewel' | 'weapon') => void;
   resetToSpawn: () => void;
   setVirtualInput: (forward: number, right: number) => void;
   triggerVirtualJump: () => void;
@@ -181,7 +193,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     const camera = new THREE.PerspectiveCamera(55, initialW / initialH, 0.2, 320);
 
-    // 2. Build Expanded Zelda/Sekiro Ancient India 3D Scene + RoomEnvironment PMREM Reflections
+    // 2. Build Portfolio Verse 3D Scene + RoomEnvironment PMREM Reflections
     const world = buildAncientWorldScene(renderer, isSoftwareGl);
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     world.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -191,12 +203,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       renderer.compile(world.scene, camera);
     }
 
-    // 3. Player Momentum Physics, 3-Stage Combo, Sekiro Posture, Shadow-Step Dodge & Free-Mouse Camera State
+    // 3. Player Momentum Physics, 3D Walkable Surface Elevation, 4-Weapon Armory & Combat State
     const colliders = getWorldColliders();
     const playerState = {
       x: 0,
       z: 8.2,
-      y: groundHeightAt(0, 8.2),
+      y: walkableSurfaceHeightAt(0, 8.2, 0),
       vx: 0,
       vz: 0,
       vy: 0,
@@ -213,7 +225,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       scaleY: 1,
       hp: 320,
       maxHp: 320,
+      outOfCombatTimer: 0,
+      hurtFlashTimer: 0,
       stamina: 100,
+      equippedWeaponId: 'weapon-nandaka' as WeaponId,
+      guidanceTargetId: 'mandapa-origin' as string | null,
+      guidanceTargetKind: 'project' as 'project' | 'jewel' | 'weapon',
       attackTimer: 0,
       attackDuration: 0.28,
       attackCooldown: 0,
@@ -292,6 +309,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.combatCalloutTimer = duration;
     };
 
+    // Equip one of the 4 Divine Forge Weapons [Keys 1-4 / E at Forge / HUD Click]
+    const performEquipWeapon = (weaponId: WeaponId) => {
+      const weaponConf = FORGE_WEAPONS.find((w) => w.id === weaponId);
+      if (!weaponConf) return;
+      playerState.equippedWeaponId = weaponId;
+      sound.playWeaponForgeEquip();
+      world.particlePool.spawnBurst(playerState.x, playerState.y + 1.1, playerState.z, 22, true);
+      showCombatCallout(
+        `⚔ EQUIPPED ${weaponConf.name.toUpperCase()} (+${weaponConf.baseDamageBonus} ATK · ${weaponConf.category.toUpperCase()})`,
+        1.8
+      );
+    };
+
     // Shinobi Shadow-Step Dodge / Dash Execution [Shift / Key X / Dash Button]
     const performDodgeDash = () => {
       if (playerState.dodgeCooldown > 0 || playerState.stamina < 12) return;
@@ -318,7 +348,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.grounded = false;
       playerState.isGliding = false;
       playerState.grappleTargetX = target.targetX;
-      playerState.grappleTargetY = target.targetY;
+      playerState.grappleTargetY = walkableSurfaceHeightAt(
+        target.targetX,
+        target.targetZ,
+        target.targetY
+      );
       playerState.grappleTargetZ = target.targetZ;
       playerState.grappleAnchorX = monRig ? monRig.grappleAnchorPos.x : target.stop.position.x;
       playerState.grappleAnchorY = monRig ? monRig.grappleAnchorPos.y : target.targetY + 6.0;
@@ -338,7 +372,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.parryCooldown = 0.32;
       sound.playParryClang(false);
 
-      const combatStats = computePlayerCombatStats(stateRef.current.visitedStopIds);
+      const combatStats = computePlayerCombatStats(
+        stateRef.current.visitedStopIds,
+        PORTFOLIO_STOPS,
+        playerState.equippedWeaponId
+      );
       let deflectedSomeone = false;
 
       for (const demon of world.demons) {
@@ -348,8 +386,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           deflectedSomeone = true;
           const postureDealt = Math.round(combatStats.postureDamage * 1.45);
           demon.posture = Math.min(demon.maxPosture, demon.posture + postureDealt);
-          demon.hitFlashTimer = 0.24;
-          demon.attackCooldown = 1.65;
+          demon.hitFlashTimer = 0.28;
+          demon.state = 'stagger';
+          demon.stateTimer = 0.65;
+          demon.attackCooldown = 1.45;
           world.particlePool.spawnBurst(demon.x, demon.y + 1.4, demon.z, 24, true);
           spawnFloatingPopup(
             demon.x,
@@ -394,12 +434,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
-    // 3-Stage Katana Combo & Surya Nova Execution [Left-Click / Key F / Key Q]
+    // 3-Stage Weapon Combo & Surya Nova Execution [Left-Click / Key F / Key Q]
     const performAttack = (isNova = false) => {
       if (playerState.attackCooldown > 0) return;
-      const combatStats = computePlayerCombatStats(stateRef.current.visitedStopIds);
+      const combatStats = computePlayerCombatStats(
+        stateRef.current.visitedStopIds,
+        PORTFOLIO_STOPS,
+        playerState.equippedWeaponId
+      );
 
-      // Advance 3-Stage Katana Combo if chained within 1.15s
+      // Advance 3-Stage Weapon Combo if chained within 1.15s
       if (isNova) {
         playerState.comboStage = 3;
       } else if (playerState.comboResetTimer > 0) {
@@ -411,12 +455,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.comboResetTimer = 1.15;
 
       const stage = playerState.comboStage;
-      const duration = isNova || stage === 3 ? 0.36 : stage === 2 ? 0.28 : 0.25;
+      const speedFactor = 1 / combatStats.speedMultiplier;
+      const duration = (isNova || stage === 3 ? 0.36 : stage === 2 ? 0.28 : 0.25) * speedFactor;
       playerState.attackDuration = duration;
       playerState.attackTimer = duration;
-      playerState.attackCooldown = isNova ? 0.38 : stage === 3 ? 0.34 : 0.22;
+      playerState.attackCooldown = (isNova ? 0.36 : stage === 3 ? 0.32 : 0.2) * speedFactor;
 
-      // Forward Katana Lunge impulse scaled by combo stage
+      // Forward Lunge impulse scaled by combo stage
       playerState.dashTimer = stage === 3 ? 0.15 : 0.11;
       playerState.dashDirX = Math.sin(playerState.yaw);
       playerState.dashDirZ = Math.cos(playerState.yaw);
@@ -434,12 +479,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       const rankBonus = computeComboRank(playerState.comboHitCount).damageMultiplier;
       const comboMult = (isNova ? 1.5 : stage === 3 ? 1.45 : stage === 2 ? 1.2 : 1.0) * rankBonus;
-      const effectiveRange = combatStats.attackRange * (isNova || stage === 3 ? 1.5 : 1.08);
+      const effectiveRange = combatStats.attackRange * (isNova || stage === 3 ? 1.5 : 1.12);
       const baseDmg = Math.round(combatStats.attackDamage * comboMult);
       const basePostureDmg = Math.round(combatStats.postureDamage * comboMult);
 
       const comboNames = {
-        1: 'I · NANDAKA CLEAVE',
+        1: `I · ${combatStats.equippedWeapon.name.toUpperCase()} CLEAVE`,
         2: 'II · ASCENDING CROSS-SLASH',
         3: isNova ? 'SURYA ASTRA NOVA' : 'III · SURYA WHIRLWIND FINISHER',
       };
@@ -452,8 +497,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const dx = demon.x - playerState.x;
         const dz = demon.z - playerState.z;
         const dist = Math.hypot(dx, dz);
-        if (dist <= effectiveRange + 0.95) {
+        if (dist <= effectiveRange + 1.05) {
           landedAnyHit = true;
+          playerState.outOfCombatTimer = 6.5;
           playerState.comboHitCount += 1;
           playerState.comboStreakDecayTimer = 4.5;
           const isDeathblow = demon.posture >= demon.maxPosture * 0.85 || isNova;
@@ -461,11 +507,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
           demon.hp = Math.max(0, demon.hp - dealtDmg);
           demon.posture = Math.min(demon.maxPosture, demon.posture + basePostureDmg);
-          demon.hitFlashTimer = 0.22;
+          demon.hitFlashTimer = 0.25;
+          demon.state = 'stagger';
+          demon.stateTimer = 0.42;
 
-          // Physical knockback impulse + collision resolution
+          // Auto-face the struck demon for crisp lock-on feel
+          playerState.yaw = Math.atan2(dx, dz);
+
+          // Physical knockback impulse
           const inv = 1 / (dist || 1);
-          const knockDist = stage === 3 || isNova ? 2.1 : 1.35;
+          const knockDist = stage === 3 || isNova ? 1.9 : 1.15;
           demon.x += dx * inv * knockDist;
           demon.z += dz * inv * knockDist;
           world.particlePool.spawnBurst(demon.x, demon.y + 1.3, demon.z, 22, true);
@@ -495,14 +546,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               demon.x,
               demon.y + 2.2,
               demon.z,
-              `-${dealtDmg}`,
+              `-${dealtDmg} HP`,
               isDeathblow || stage === 3 ? 'crit' : 'damage',
-              comboNames[stage]
+              `${demon.hp}/${demon.maxHp} HP LEFT`
             );
             if (demon.posture >= demon.maxPosture) {
               showCombatCallout('危 POSTURE BROKEN · STRIKE FOR SHINOBI DEATHBLOW!', 1.5);
             } else {
-              showCombatCallout(`${comboNames[stage]} · -${dealtDmg} HP`, 1.0);
+              showCombatCallout(
+                `${comboNames[stage]} · -${dealtDmg} HP (${demon.hp}/${demon.maxHp})`,
+                1.1
+              );
             }
           }
         }
@@ -516,6 +570,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const dist = Math.hypot(dx, dz);
         if (dist <= effectiveRange + 2.9) {
           landedAnyHit = true;
+          playerState.outOfCombatTimer = 6.5;
           playerState.comboHitCount += 1;
           playerState.comboStreakDecayTimer = 4.5;
           const isBossDeathblow = boss.posture >= boss.maxPosture;
@@ -541,7 +596,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               boss.x,
               boss.y + 4.0,
               boss.z,
-              `-${dealtBossDmg}`,
+              `-${dealtBossDmg} HP`,
               stage === 3 ? 'crit' : 'damage',
               comboNames[stage]
             );
@@ -580,12 +635,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
       boss.x = 0;
       boss.z = -48;
-      boss.y = groundHeightAt(0, -48);
+      boss.y = walkableSurfaceHeightAt(0, -48, 0);
       boss.group.position.set(boss.x, boss.y, boss.z);
 
       playerState.x = 0;
       playerState.z = -39.5;
-      playerState.y = groundHeightAt(0, -39.5);
+      playerState.y = walkableSurfaceHeightAt(0, -39.5, 0);
       playerState.vx = 0;
       playerState.vz = 0;
       playerState.vy = 0;
@@ -605,32 +660,52 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       teleportToStop(stopId: string) {
         const stop = PORTFOLIO_STOPS.find((s) => s.id === stopId);
         if (!stop) return;
-        const dirToCenterX = -stop.position.x;
-        const dirToCenterZ = -stop.position.z;
-        const len = Math.hypot(dirToCenterX, dirToCenterZ) || 1;
-        const standDist = stop.interactionRadius * 0.78;
-        playerState.x = stop.position.x + (dirToCenterX / len) * standDist;
-        playerState.z = stop.position.z + (dirToCenterZ / len) * standDist;
-        playerState.y = groundHeightAt(playerState.x, playerState.z);
+        playerState.guidanceTargetId = stop.id;
+        playerState.guidanceTargetKind = 'project';
+        // Place player right at the foot of the front ceremonial stairs (+Z approach)
+        playerState.x = stop.position.x;
+        playerState.z = stop.position.z + 6.8;
+        playerState.y = walkableSurfaceHeightAt(playerState.x, playerState.z, 2.0);
         playerState.vx = 0;
         playerState.vz = 0;
         playerState.vy = 0;
         playerState.grounded = true;
         playerState.isGliding = false;
         playerState.grappleActive = false;
-        playerState.yaw = Math.atan2(
-          stop.position.x - playerState.x,
-          stop.position.z - playerState.z
-        );
+        playerState.yaw = Math.PI;
         world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
         world.playerRig.group.rotation.y = playerState.yaw;
         world.particlePool.spawnBurst(playerState.x, playerState.y + 0.5, playerState.z, 16, true);
         stateRef.current.onInspectStop(stop.id);
       },
+      teleportToPoint(x: number, z: number, label?: string) {
+        playerState.x = x;
+        playerState.z = z;
+        playerState.y = walkableSurfaceHeightAt(x, z, 2.0);
+        playerState.vx = 0;
+        playerState.vz = 0;
+        playerState.vy = 0;
+        playerState.grounded = true;
+        playerState.isGliding = false;
+        playerState.grappleActive = false;
+        world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
+        world.particlePool.spawnBurst(playerState.x, playerState.y + 0.5, playerState.z, 16, true);
+        sound.playTempleBell(528);
+        if (label) {
+          showCombatCallout(`FAST TRAVEL → ${label.toUpperCase()}`, 1.4);
+        }
+      },
+      equipWeapon(weaponId: WeaponId) {
+        performEquipWeapon(weaponId);
+      },
+      setGuidanceTarget(id: string, kind: 'project' | 'jewel' | 'weapon') {
+        playerState.guidanceTargetId = id;
+        playerState.guidanceTargetKind = kind;
+      },
       resetToSpawn() {
         playerState.x = 0;
         playerState.z = 8.2;
-        playerState.y = groundHeightAt(0, 8.2);
+        playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
         playerState.vx = 0;
         playerState.vz = 0;
         playerState.vy = 0;
@@ -639,6 +714,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.grappleActive = false;
         playerState.yaw = Math.PI;
         playerState.hp = playerState.maxHp;
+        playerState.outOfCombatTimer = 0;
         camState.yaw = 0;
         camState.pitch = 0.15;
         camState.distance = 4.15;
@@ -729,6 +805,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           } else {
             playerState.jumpBufferTimer = 0.14;
           }
+        } else if (code === 'Digit1') {
+          performEquipWeapon('weapon-nandaka');
+        } else if (code === 'Digit2') {
+          performEquipWeapon('weapon-surya-greatsword');
+        } else if (code === 'Digit3') {
+          performEquipWeapon('weapon-agni-twinblades');
+        } else if (code === 'Digit4') {
+          performEquipWeapon('weapon-brahmastra-halberd');
         } else if (code === 'KeyF' || code === 'KeyJ') {
           e.preventDefault();
           performAttack(false);
@@ -747,13 +831,19 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           e.preventDefault();
           awakenAndFocusLayoffBoss();
         } else if (code === 'KeyE' || code === 'Enter') {
-          const near = findNearestStop({ x: playerState.x, z: playerState.z });
-          if (near.inRange) {
+          const nearForge = findNearestWeaponForge({ x: playerState.x, z: playerState.z });
+          if (nearForge.inRange) {
             e.preventDefault();
-            if (stateRef.current.activeStopId === near.nearestStop.id) {
-              stateRef.current.onCloseStop();
-            } else {
-              stateRef.current.onInspectStop(near.nearestStop.id);
+            performEquipWeapon(nearForge.nearestWeapon.id);
+          } else {
+            const near = findNearestStop({ x: playerState.x, z: playerState.z });
+            if (near.inRange) {
+              e.preventDefault();
+              if (stateRef.current.activeStopId === near.nearestStop.id) {
+                stateRef.current.onCloseStop();
+              } else {
+                stateRef.current.onInspectStop(near.nearestStop.id);
+              }
             }
           }
         } else if (code === 'KeyR') {
@@ -775,7 +865,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       hasPointerPos = false;
     };
 
-    // Mouse Clicks on 3D Canvas: Left-Click = Katana Combo Strike, Right-Click = Sekiro Deflect
     const onPointerDown = (e: PointerEvent) => {
       if (stateRef.current.gameState !== 'playing' || stateRef.current.activeStopId) return;
       if (e.button === 2) {
@@ -787,7 +876,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
-    // FREE-MOVE MOUSE CAMERA PAN: Rotates camera smoothly on mouse movement alone (no click required!)
     const onPointerMove = (e: PointerEvent) => {
       if (stateRef.current.gameState !== 'playing' || stateRef.current.activeStopId) {
         hasPointerPos = false;
@@ -974,7 +1062,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       lastTime = now;
       const frameDt = Math.min(Math.max(rawDt, 0.001), 0.05);
 
-      // Sekiro Hit-Stop Micro-Freeze for visceral sword impact feel
       if (playerState.hitStopTimer > 0) {
         playerState.hitStopTimer = Math.max(0, playerState.hitStopTimer - frameDt);
       }
@@ -999,9 +1086,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
       }
 
-      // Sync Player Power Visuals
-      const combatStats = computePlayerCombatStats(visitedStopsNow);
-      world.updatePlayerPowerVisuals(combatStats.unlockedPowersCount, combatStats.activeColorHex);
+      // Sync Player Power & Equipped Weapon Visuals
+      const combatStats = computePlayerCombatStats(
+        visitedStopsNow,
+        PORTFOLIO_STOPS,
+        playerState.equippedWeaponId
+      );
+      world.updatePlayerPowerVisuals(
+        combatStats.unlockedPowersCount,
+        combatStats.activeColorHex,
+        playerState.equippedWeaponId
+      );
 
       // Check if Colossal September Layoff Boss should awaken
       const boss = world.layoffBoss;
@@ -1039,6 +1134,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.attackTimer = Math.max(0, playerState.attackTimer - frameDt);
         playerState.attackCooldown = Math.max(0, playerState.attackCooldown - frameDt);
         playerState.comboResetTimer = Math.max(0, playerState.comboResetTimer - frameDt);
+        playerState.outOfCombatTimer = Math.max(0, playerState.outOfCombatTimer - frameDt);
+        playerState.hurtFlashTimer = Math.max(0, playerState.hurtFlashTimer - frameDt * 1.8);
+
         if (playerState.comboStreakDecayTimer > 0) {
           playerState.comboStreakDecayTimer = Math.max(0, playerState.comboStreakDecayTimer - frameDt);
           if (playerState.comboStreakDecayTimer <= 0) {
@@ -1066,11 +1164,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        // Passive Prana (HP) regeneration
-        if (playerState.hp < playerState.maxHp) {
+        // Out-of-Combat Prana Regeneration ONLY (Never erase damage during active combat!)
+        if (playerState.outOfCombatTimer <= 0 && playerState.hp < playerState.maxHp) {
           playerState.hp = Math.min(
             playerState.maxHp,
-            playerState.hp + (4.5 + combatStats.unlockedPowersCount * 2.2) * dt
+            playerState.hp + (8.0 + combatStats.unlockedPowersCount * 2.5) * dt
           );
         }
 
@@ -1118,7 +1216,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           if (dist3D < 1.2) {
             playerState.x = playerState.grappleTargetX;
             playerState.z = playerState.grappleTargetZ;
-            playerState.y = playerState.grappleTargetY;
+            playerState.y = walkableSurfaceHeightAt(
+              playerState.x,
+              playerState.z,
+              playerState.grappleTargetY
+            );
             playerState.vx = 0;
             playerState.vz = 0;
             playerState.vy = 0;
@@ -1137,7 +1239,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         } else {
           world.updateGrappleLine(false);
 
-          // 2. Momentum-Damped Horizontal Physics + Katana Lunge / Shadow-Step Dash Impulse
+          // 2. Momentum-Damped Horizontal Physics + Step-Height / Wall Check
           const glideSpeedMult = playerState.isGliding ? PARAGLIDE_SPEED_MULTIPLIER : 1.0;
           const targetVx = moveVec.vx * glideSpeedMult;
           const targetVz = moveVec.vz * glideSpeedMult;
@@ -1168,11 +1270,25 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             const nextZ = playerState.z + totalVz * dt;
             const resolved = resolveCollisions({ x: nextX, z: nextZ }, PLAYER_RADIUS, colliders);
 
-            const stepDist = Math.hypot(resolved.x - playerState.x, resolved.z - playerState.z);
-            playerState.x = resolved.x;
-            playerState.z = resolved.z;
-            playerState.walkCycleDist += stepDist;
-            playerState.distanceTraveled += stepDist;
+            // Prevent walking horizontally through tall un-steppable platform ledges (>0.72m high) unless jumping above them
+            const highSurfaceAtNext = walkableSurfaceHeightAt(resolved.x, resolved.z, playerState.y + 1.4);
+            const stepRise = highSurfaceAtNext - playerState.y;
+            if (stepRise <= 0.72 || !playerState.grounded) {
+              const stepDist = Math.hypot(resolved.x - playerState.x, resolved.z - playerState.z);
+              playerState.x = resolved.x;
+              playerState.z = resolved.z;
+              playerState.walkCycleDist += stepDist;
+              playerState.distanceTraveled += stepDist;
+            } else {
+              // Slide along the platform edge instead of clipping inside it
+              const tryX = walkableSurfaceHeightAt(resolved.x, playerState.z, playerState.y + 1.4);
+              const tryZ = walkableSurfaceHeightAt(playerState.x, resolved.z, playerState.y + 1.4);
+              if (tryX - playerState.y <= 0.72) {
+                playerState.x = resolved.x;
+              } else if (tryZ - playerState.y <= 0.72) {
+                playerState.z = resolved.z;
+              }
+            }
 
             if (moveVec.targetYaw !== null) {
               const prevYaw = playerState.yaw;
@@ -1185,7 +1301,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               );
             }
 
-            // Only gently align camera behind player if user hasn't panned mouse recently (> 2.4s)
             if (now - camState.lastMousePanTime > 2400 && hasMoveInput) {
               const desiredCamYaw = playerState.yaw + Math.PI;
               camState.yaw = dampAngle(camState.yaw, desiredCamYaw, 0.95, dt);
@@ -1200,8 +1315,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             playerState.bankRoll = THREE.MathUtils.lerp(playerState.bankRoll, 0, 1 - Math.exp(-12 * dt));
           }
 
-          // 3. Jump & Zelda Paraglider Vertical Physics
-          const floorY = groundHeightAt(playerState.x, playerState.z);
+          // 3. 3D Walkable Surface Elevation (Stairs, Plinths, Bridges, Pedestals, Boulders) + Jump & Paraglider
+          const surfaceY = walkableSurfaceHeightAt(playerState.x, playerState.z, playerState.y);
           if (playerState.grounded) {
             playerState.coyoteTimer = 0.12;
             playerState.isGliding = false;
@@ -1212,14 +1327,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           if (playerState.jumpBufferTimer > 0) {
             playerState.jumpBufferTimer = Math.max(0, playerState.jumpBufferTimer - dt);
             if (playerState.coyoteTimer > 0) {
-              playerState.vy = 8.5;
+              playerState.vy = 8.8;
               playerState.grounded = false;
               playerState.coyoteTimer = 0;
               playerState.jumpBufferTimer = 0;
               playerState.scaleX = 0.84;
               playerState.scaleY = 1.2;
               sound.playJump(false);
-              world.particlePool.spawnBurst(playerState.x, floorY, playerState.z, 6, false);
+              world.particlePool.spawnBurst(playerState.x, surfaceY, playerState.z, 6, false);
             }
           }
 
@@ -1238,18 +1353,31 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             playerState.stamina = glideStep.nextStamina;
 
             playerState.y += playerState.vy * dt;
-            if (playerState.y <= floorY) {
-              playerState.y = floorY;
+            if (playerState.y <= surfaceY && playerState.vy <= 0) {
+              playerState.y = surfaceY;
               playerState.vy = 0;
               playerState.grounded = true;
               playerState.isGliding = false;
               playerState.scaleX = 1.22;
               playerState.scaleY = 0.78;
               sound.playJump(true);
-              world.particlePool.spawnBurst(playerState.x, floorY, playerState.z, 8, false);
+              world.particlePool.spawnBurst(playerState.x, surfaceY, playerState.z, 8, false);
             }
           } else {
-            playerState.y = floorY;
+            // Smoothly step up/down onto temple staircases, plinths, bridges, and pedestals
+            const heightDiff = surfaceY - playerState.y;
+            if (heightDiff < -0.55) {
+              // Stepped off a high ledge -> start falling naturally
+              playerState.grounded = false;
+              playerState.vy = 0;
+            } else {
+              playerState.y = THREE.MathUtils.lerp(
+                playerState.y,
+                surfaceY,
+                1 - Math.exp(-26 * dt)
+              );
+            }
+
             if (actualHorizontalSpeed > 7.5) {
               playerState.stamina = Math.max(15, playerState.stamina - 14 * dt);
             } else {
@@ -1262,7 +1390,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.scaleX = THREE.MathUtils.lerp(playerState.scaleX, 1, scaleDamp);
         playerState.scaleY = THREE.MathUtils.lerp(playerState.scaleY, 1, scaleDamp);
 
-        const floorYNow = groundHeightAt(playerState.x, playerState.z);
+        const surfaceYNow = walkableSurfaceHeightAt(playerState.x, playerState.z, playerState.y);
         const rig = world.playerRig;
         rig.group.position.set(playerState.x, playerState.y, playerState.z);
         rig.group.rotation.y = playerState.yaw;
@@ -1275,21 +1403,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         rig.leftLeg.rotation.x = Math.sin(gaitPhase) * swingAmp;
         rig.rightLeg.rotation.x = -Math.sin(gaitPhase) * swingAmp;
         rig.leftArm.rotation.x = -Math.sin(gaitPhase) * swingAmp * 0.85;
-        if (playerState.attackTimer <= 0) {
-          rig.rightArm.rotation.x = Math.sin(gaitPhase) * swingAmp * 0.85;
-        }
         rig.cloakMesh.rotation.x =
           0.14 +
           Math.abs(Math.sin(gaitPhase)) * 0.18 * speedRatio +
           (playerState.dodgeIframeTimer > 0 ? 0.35 : playerState.grounded ? 0 : 0.25);
 
-        rig.shadowDisc.position.y = Math.max(0.015, floorYNow - playerState.y + 0.015);
-        const heightAboveFloor = Math.max(0, playerState.y - floorYNow);
+        rig.shadowDisc.position.y = Math.max(0.015, surfaceYNow - playerState.y + 0.015);
+        const heightAboveFloor = Math.max(0, playerState.y - surfaceYNow);
         rig.shadowDisc.scale.setScalar(Math.max(0.35, 1 - heightAboveFloor * 0.18));
 
-        // 4. Update Roaming Asura Demons AI, Sekiro Posture, Shadow-Step Dodge & Perilous Attacks
+        // Update Dynamic Shadow Camera Frustum around the Player
+        world.updateShadowCamera(playerState.x, playerState.z);
+
+        // 4. Update Roaming Asura Demons Active Combat AI (Patrol -> Chase -> Windup -> Lunge Strike -> Recover)
         let nearestDemonDist = Infinity;
         let nearestDemonName: string | null = null;
+        let engagedDemonEntity: (typeof world.demons)[number] | null = null;
         let aliveDemonsCount = 0;
 
         for (const demon of world.demons) {
@@ -1297,128 +1426,207 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           aliveDemonsCount += 1;
 
           demon.hitFlashTimer = Math.max(0, demon.hitFlashTimer - dt);
-          demon.attackCooldown = Math.max(0, demon.attackCooldown - dt);
-          if (demon.hitFlashTimer <= 0 && demon.posture < demon.maxPosture) {
-            demon.posture = Math.max(0, demon.posture - 2.5 * dt);
+          if (demon.hitFlashTimer <= 0 && demon.posture < demon.maxPosture && demon.state === 'patrol') {
+            demon.posture = Math.max(0, demon.posture - 2.0 * dt);
           }
 
           if (demon.mixer) {
             demon.mixer.update(dt);
           }
 
-          const dxToPlayer = playerState.x - demon.x;
-          const dzToPlayer = playerState.z - demon.z;
-          const distToPlayer = Math.hypot(dxToPlayer, dzToPlayer);
+          const prevState = demon.state;
+          const aiStep = stepDemonCombatAI(
+            {
+              x: demon.x,
+              z: demon.z,
+              homeX: demon.homeX,
+              homeZ: demon.homeZ,
+              aggroRange: demon.aggroRange,
+              moveSpeed: demon.moveSpeed,
+              archetype: demon.archetype,
+              state: demon.state,
+              stateTimer: demon.stateTimer,
+              attackCooldown: demon.attackCooldown,
+              yaw: demon.yaw,
+            },
+            { x: playerState.x, z: playerState.z },
+            elapsedTotal,
+            dt,
+            Boolean(activeStopIdNow)
+          );
 
+          demon.x = aiStep.x;
+          demon.z = aiStep.z;
+          demon.yaw = aiStep.yaw;
+          demon.state = aiStep.state;
+          demon.stateTimer = aiStep.stateTimer;
+          demon.attackCooldown = aiStep.attackCooldown;
+
+          const distToPlayer = Math.hypot(playerState.x - demon.x, playerState.z - demon.z);
           if (distToPlayer < nearestDemonDist) {
             nearestDemonDist = distToPlayer;
             nearestDemonName = demon.name;
+            engagedDemonEntity = demon;
           }
 
-          if (distToPlayer < demon.aggroRange && !activeStopIdNow) {
-            const step = 3.9 * dt;
-            if (distToPlayer > 1.95) {
-              demon.x += (dxToPlayer / distToPlayer) * step;
-              demon.z += (dzToPlayer / distToPlayer) * step;
-            } else if (demon.attackCooldown <= 0) {
-              demon.attackCooldown = 1.45;
-              const defenseOutcome = resolveCombatDefense(
-                14,
-                28,
-                playerState.parryTimer,
-                playerState.dodgeIframeTimer
+          // Switch skeletal clip based on AI state
+          if (demon.state === 'chase' || demon.state === 'strike') {
+            demon.setClip('run');
+          } else {
+            demon.setClip('walk');
+          }
+
+          // Play Perilous Warning chime when an enemy begins its attack windup!
+          if (prevState !== 'windup' && demon.state === 'windup') {
+            sound.playPerilousWarning();
+          }
+
+          // Execute Enemy Lunge Strike against the Player!
+          if (aiStep.didStrikePlayer) {
+            playerState.outOfCombatTimer = 6.5;
+            const defenseOutcome = resolveCombatDefense(
+              demon.attackDamage,
+              32,
+              playerState.parryTimer,
+              playerState.dodgeIframeTimer
+            );
+
+            if (defenseOutcome.isPerfectDeflect) {
+              playerState.comboHitCount += 2;
+              playerState.comboStreakDecayTimer = 4.5;
+              playerState.stamina = Math.min(100, playerState.stamina + defenseOutcome.staminaRestored);
+              demon.posture = Math.min(
+                demon.maxPosture,
+                demon.posture + defenseOutcome.enemyPostureDamageDealt
               );
-              if (defenseOutcome.isPerfectDeflect) {
-                playerState.comboHitCount += 2;
-                playerState.comboStreakDecayTimer = 4.5;
-                playerState.stamina = Math.min(100, playerState.stamina + defenseOutcome.staminaRestored);
-                demon.posture = Math.min(
-                  demon.maxPosture,
-                  demon.posture + defenseOutcome.enemyPostureDamageDealt
-                );
-                demon.hitFlashTimer = 0.25;
-                sound.playParryClang(true);
-                playerState.hitStopTimer = 0.04;
-                camState.shakeIntensity = 0.2;
-                spawnFloatingPopup(
-                  demon.x,
-                  demon.y + 2.3,
-                  demon.z,
-                  `+${defenseOutcome.enemyPostureDamageDealt} POSTURE`,
-                  'parry',
-                  'PERFECT DEFLECT'
-                );
-                showCombatCallout('PERFECT SEKIRO DEFLECT!', 1.4);
-                world.particlePool.spawnBurst(demon.x, demon.y + 1.4, demon.z, 24, true);
-              } else if (defenseOutcome.isPerfectDodge) {
-                playerState.comboHitCount += 1;
-                playerState.comboStreakDecayTimer = 4.5;
-                playerState.stamina = Math.min(100, playerState.stamina + defenseOutcome.staminaRestored);
-                demon.posture = Math.min(
-                  demon.maxPosture,
-                  demon.posture + defenseOutcome.enemyPostureDamageDealt
-                );
-                sound.playDash(true);
-                spawnFloatingPopup(
-                  playerState.x,
-                  playerState.y + 2.1,
-                  playerState.z,
-                  'SHADOW STEP',
-                  'parry',
-                  '+25 STAMINA'
-                );
-                showCombatCallout('PERFECT SHADOW-STEP DODGE · +25 STAMINA', 1.3);
+              demon.hitFlashTimer = 0.28;
+              demon.state = 'stagger';
+              demon.stateTimer = 0.7;
+              sound.playParryClang(true);
+              playerState.hitStopTimer = 0.045;
+              camState.shakeIntensity = 0.22;
+              spawnFloatingPopup(
+                demon.x,
+                demon.y + 2.3,
+                demon.z,
+                `+${defenseOutcome.enemyPostureDamageDealt} POSTURE`,
+                'parry',
+                'PERFECT DEFLECT'
+              );
+              showCombatCallout('PERFECT SEKIRO DEFLECT!', 1.4);
+              world.particlePool.spawnBurst(demon.x, demon.y + 1.4, demon.z, 24, true);
+            } else if (defenseOutcome.isPerfectDodge) {
+              playerState.comboHitCount += 1;
+              playerState.comboStreakDecayTimer = 4.5;
+              playerState.stamina = Math.min(100, playerState.stamina + defenseOutcome.staminaRestored);
+              demon.posture = Math.min(
+                demon.maxPosture,
+                demon.posture + defenseOutcome.enemyPostureDamageDealt
+              );
+              sound.playDash(true);
+              spawnFloatingPopup(
+                playerState.x,
+                playerState.y + 2.1,
+                playerState.z,
+                'SHADOW STEP',
+                'parry',
+                '+25 STAMINA'
+              );
+              showCombatCallout('PERFECT SHADOW-STEP DODGE · +25 STAMINA', 1.3);
+            } else {
+              // Real Player HP Reduction + Hurt Sound + Red Vignette + Knockback!
+              const dmg = defenseOutcome.hpDamageTaken;
+              playerState.hp = Math.max(0, playerState.hp - dmg);
+              playerState.hurtFlashTimer = 0.75;
+              camState.shakeIntensity = 0.22;
+              sound.playPlayerHurt();
+              spawnFloatingPopup(
+                playerState.x,
+                playerState.y + 2.0,
+                playerState.z,
+                `-${dmg} PRANA`,
+                'deathblow',
+                `${demon.name.toUpperCase()} STRIKE`
+              );
+              world.particlePool.spawnBurst(
+                playerState.x,
+                playerState.y + 1.1,
+                playerState.z,
+                16,
+                false
+              );
+
+              if (playerState.hp <= 0) {
+                playerState.hp = Math.round(playerState.maxHp * 0.65);
+                sound.playTempleBell(432);
+                showCombatCallout('PRANA DEPLETED · GARUDA SECOND WIND RESURGENCE!', 2.4);
               } else {
-                playerState.hp = Math.max(40, playerState.hp - defenseOutcome.hpDamageTaken);
-                camState.shakeIntensity = 0.14;
-                world.particlePool.spawnBurst(
-                  playerState.x,
-                  playerState.y + 1.0,
-                  playerState.z,
-                  8,
-                  false
+                showCombatCallout(
+                  `STRUCK BY ${demon.name.toUpperCase()} (-${dmg} HP) · PRESS [RMB] TO DEFLECT!`,
+                  1.5
                 );
               }
             }
-            demon.yaw = Math.atan2(dxToPlayer, dzToPlayer);
-          } else {
-            const patrolAngle = elapsedTotal * 0.7 + demon.homeX;
-            const targetX = demon.homeX + Math.cos(patrolAngle) * 2.8;
-            const targetZ = demon.homeZ + Math.sin(patrolAngle) * 2.8;
-            const pdx = targetX - demon.x;
-            const pdz = targetZ - demon.z;
-            demon.x += pdx * 1.5 * dt;
-            demon.z += pdz * 1.5 * dt;
-            demon.yaw = Math.atan2(pdx, pdz);
           }
 
-          demon.y = groundHeightAt(demon.x, demon.z);
+          demon.y = walkableSurfaceHeightAt(demon.x, demon.z, demon.y);
           demon.group.position.set(demon.x, demon.y, demon.z);
           demon.bodyGroup.rotation.y = demon.yaw;
 
-          // Dynamic windup & stagger animatics on demons
-          const windup =
-            distToPlayer < 3.2 && demon.attackCooldown < 0.45
-              ? -1.25 * (1 - demon.attackCooldown / 0.45)
-              : Math.sin(elapsedTotal * 5 + demon.homeX) * 0.45;
-          demon.leftArm.rotation.x = windup;
-          demon.rightArm.rotation.x = -windup;
-          demon.bodyGroup.rotation.x = demon.hitFlashTimer > 0 ? -0.28 : 0;
+          // Demon Windup, Lunge Slash Arc & Telegraph Ring Visuals
+          if (demon.state === 'windup') {
+            const windPct = 1 - demon.stateTimer / 0.48;
+            demon.leftArm.rotation.x = -1.45 * windPct;
+            demon.rightArm.rotation.x = -1.45 * windPct;
+            demon.bodyGroup.rotation.x = -0.18 * windPct;
+            if (demon.telegraphRingMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.telegraphRingMesh.material.opacity = 0.35 + windPct * 0.55;
+              demon.telegraphRingMesh.scale.setScalar(0.8 + windPct * 0.45);
+            }
+            if (demon.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.slashArcMesh.material.opacity = 0;
+            }
+          } else if (demon.state === 'strike') {
+            const strikePct = 1 - demon.stateTimer / 0.26;
+            demon.leftArm.rotation.x = 0.95;
+            demon.rightArm.rotation.x = 1.15;
+            demon.bodyGroup.rotation.x = 0.28;
+            demon.slashArcMesh.rotation.y = -1.2 + strikePct * 2.5;
+            demon.slashArcMesh.scale.setScalar(0.95 + strikePct * 0.45);
+            if (demon.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.slashArcMesh.material.opacity = Math.sin(strikePct * Math.PI) * 0.92;
+            }
+            if (demon.telegraphRingMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.telegraphRingMesh.material.opacity = 0.25;
+            }
+          } else {
+            const swing = Math.sin(elapsedTotal * 5 + demon.homeX) * 0.45;
+            demon.leftArm.rotation.x = swing;
+            demon.rightArm.rotation.x = -swing;
+            demon.bodyGroup.rotation.x = demon.hitFlashTimer > 0 ? -0.32 : 0;
+            if (demon.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.slashArcMesh.material.opacity = 0;
+            }
+            if (demon.telegraphRingMesh.material instanceof THREE.MeshBasicMaterial) {
+              demon.telegraphRingMesh.material.opacity = 0;
+            }
+          }
 
-          const hitScale = demon.hitFlashTimer > 0 ? demon.scale * 1.18 : demon.scale;
+          const hitScale = demon.hitFlashTimer > 0 ? demon.scale * 1.16 : demon.scale;
           demon.bodyGroup.scale.setScalar(hitScale);
 
-          const hpRatio = Math.max(0.02, demon.hp / demon.maxHp);
-          demon.hpBarFill.scale.x = hpRatio;
-          demon.hpBarFill.lookAt(camera.position);
+          // Update Left-Aligned Framed 3D Vitality & Posture Bars above Demon
+          demon.hpBarGroup.lookAt(camera.position);
+          const hpRatio = THREE.MathUtils.clamp(demon.hp / demon.maxHp, 0.0, 1.0);
+          demon.hpBarFill.scale.x = Math.max(0.001, hpRatio);
 
-          const postureRatio = Math.max(0.02, demon.posture / demon.maxPosture);
-          demon.postureBarFill.scale.x = postureRatio;
-          demon.postureBarFill.lookAt(camera.position);
+          const postureRatio = THREE.MathUtils.clamp(demon.posture / demon.maxPosture, 0.0, 1.0);
+          demon.postureBarFill.scale.x = Math.max(0.001, postureRatio);
 
           demon.kanjiSprite.visible =
             demon.posture >= demon.maxPosture * 0.8 ||
-            (distToPlayer < 4.5 && demon.attackCooldown < 0.38);
+            demon.state === 'windup' ||
+            demon.state === 'strike';
         }
 
         // 5. Update Colossal September Layoff Boss AI, Sekiro Posture & Perilous Attacks
@@ -1437,12 +1645,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           bossDistToPlayer = bDist;
 
           if (bDist < 32 && bDist > 3.2 && !activeStopIdNow) {
-            boss.x += (bdx / bDist) * 2.9 * dt;
-            boss.z += (bdz / bDist) * 2.9 * dt;
-          } else if (bDist <= 4.3 && boss.attackTimer > 1.75 && !activeStopIdNow) {
+            boss.x += (bdx / bDist) * 3.1 * dt;
+            boss.z += (bdz / bDist) * 3.1 * dt;
+          } else if (bDist <= 4.5 && boss.attackTimer > 1.55 && !activeStopIdNow) {
             boss.attackTimer = 0;
+            playerState.outOfCombatTimer = 6.5;
             const bossDefense = resolveCombatDefense(
-              22,
+              26,
               42,
               playerState.parryTimer,
               playerState.dodgeIframeTimer
@@ -1488,13 +1697,28 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               );
               showCombatCallout('PERFECT SHADOW-STEP · BOSS STRIKE EVADED!', 1.4);
             } else {
-              playerState.hp = Math.max(40, playerState.hp - bossDefense.hpDamageTaken);
-              camState.shakeIntensity = 0.22;
+              const bDmg = bossDefense.hpDamageTaken;
+              playerState.hp = Math.max(0, playerState.hp - bDmg);
+              playerState.hurtFlashTimer = 0.85;
+              camState.shakeIntensity = 0.26;
+              sound.playPlayerHurt();
+              spawnFloatingPopup(
+                playerState.x,
+                playerState.y + 2.1,
+                playerState.z,
+                `-${bDmg} PRANA`,
+                'deathblow',
+                'SEVERANCE CLEAVE'
+              );
+              if (playerState.hp <= 0) {
+                playerState.hp = Math.round(playerState.maxHp * 0.65);
+                showCombatCallout('PRANA DEPLETED · GARUDA SECOND WIND RESURGENCE!', 2.4);
+              }
             }
           }
 
           boss.yaw = Math.atan2(bdx, bdz);
-          boss.y = groundHeightAt(boss.x, boss.z);
+          boss.y = walkableSurfaceHeightAt(boss.x, boss.z, boss.y);
           boss.group.position.set(boss.x, boss.y, boss.z);
           boss.bodyGroup.rotation.y = boss.yaw;
           boss.bodyGroup.rotation.x = boss.hitFlashTimer > 0 ? -0.22 : 0;
@@ -1511,11 +1735,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           boss.kanjiSprite.visible = boss.posture >= boss.maxPosture * 0.85 || bDist < 6.5;
         }
 
-        // 6. Adaptive Music Mood Engine: Calm Raga Yaman when exploring, Fierce War-Taiko when fighting!
+        // 6. Adaptive Music Mood Engine
         const inCombatNow =
           !activeStopIdNow &&
           currentMode === 'playing' &&
-          (nearestDemonDist < 14.5 || (boss.awakened && !boss.defeated && bossDistToPlayer < 36));
+          (nearestDemonDist < 16.0 || (boss.awakened && !boss.defeated && bossDistToPlayer < 36));
         sound.setMusicMood(inCombatNow ? 'combat' : 'calm');
 
         // Check Sacred Experience Lotus Relic Pickup
@@ -1536,6 +1760,91 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
         const nearInfo = findNearestStop({ x: playerState.x, z: playerState.z });
         const nearStop = nearInfo.inRange ? nearInfo.nearestStop : null;
+        const nearForgeInfo = findNearestWeaponForge({ x: playerState.x, z: playerState.z });
+        const nearWeaponForge = nearForgeInfo.inRange ? nearForgeInfo.nearestWeapon : null;
+
+        // 7. Update 3D Golden Prana Guidance Trail toward Tracked Objective
+        let resolvedTracked: HudTelemetry['trackedTarget'] = null;
+        if (playerState.guidanceTargetKind === 'project') {
+          let targetStop = PORTFOLIO_STOPS.find((s) => s.id === playerState.guidanceTargetId);
+          if (!targetStop || visitedStopsNow.has(targetStop.id)) {
+            const firstUnvisited = PORTFOLIO_STOPS.find((s) => !visitedStopsNow.has(s.id));
+            if (firstUnvisited) targetStop = firstUnvisited;
+          }
+          if (targetStop) {
+            const d = Math.round(
+              Math.hypot(targetStop.position.x - playerState.x, targetStop.position.z - playerState.z)
+            );
+            resolvedTracked = {
+              id: targetStop.id,
+              kind: 'project',
+              title: targetStop.title,
+              subtitle: `Project Sanctum ${targetStop.indexNumber}`,
+              distance: d,
+              accentColor: targetStop.accentColor,
+            };
+            world.updateGuidanceTrail(
+              !activeStopIdNow,
+              playerState.x,
+              playerState.z,
+              targetStop.position.x,
+              targetStop.position.z + 5.5,
+              targetStop.accentColor,
+              elapsedTotal
+            );
+          }
+        } else if (playerState.guidanceTargetKind === 'jewel') {
+          const targetRelic =
+            LOTUS_RELICS.find((r) => r.id === playerState.guidanceTargetId) ||
+            LOTUS_RELICS.find((r) => !collectedRelicsNow.has(r.id)) ||
+            LOTUS_RELICS[0];
+          const d = Math.round(
+            Math.hypot(targetRelic.position.x - playerState.x, targetRelic.position.z - playerState.z)
+          );
+          resolvedTracked = {
+            id: targetRelic.id,
+            kind: 'jewel',
+            title: `${targetRelic.company} Jewel`,
+            subtitle: targetRelic.era,
+            distance: d,
+            accentColor: '#c084fc',
+          };
+          world.updateGuidanceTrail(
+            !activeStopIdNow,
+            playerState.x,
+            playerState.z,
+            targetRelic.position.x,
+            targetRelic.position.z,
+            '#c084fc',
+            elapsedTotal
+          );
+        } else if (playerState.guidanceTargetKind === 'weapon') {
+          const targetWeapon =
+            FORGE_WEAPONS.find((w) => w.id === playerState.guidanceTargetId) || FORGE_WEAPONS[0];
+          const d = Math.round(
+            Math.hypot(
+              targetWeapon.position.x - playerState.x,
+              targetWeapon.position.z - playerState.z
+            )
+          );
+          resolvedTracked = {
+            id: targetWeapon.id,
+            kind: 'weapon',
+            title: targetWeapon.name,
+            subtitle: `+${targetWeapon.baseDamageBonus} ATK Forge`,
+            distance: d,
+            accentColor: targetWeapon.colorHex,
+          };
+          world.updateGuidanceTrail(
+            !activeStopIdNow,
+            playerState.x,
+            playerState.z,
+            targetWeapon.position.x,
+            targetWeapon.position.z,
+            targetWeapon.colorHex,
+            elapsedTotal
+          );
+        }
 
         const inspectedStop = activeStopIdNow
           ? PORTFOLIO_STOPS.find((s) => s.id === activeStopIdNow) || null
@@ -1590,7 +1899,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           }
         }
 
-        // Dynamic Camera FOV Kick for AAA speed & combat focus
         const nextFov = computeDynamicCameraFov(
           camera.fov,
           actualHorizontalSpeed,
@@ -1648,38 +1956,160 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const headingDeg = ((THREE.MathUtils.radToDeg(headingRad) % 360) + 360) % 360;
 
           camera.updateMatrixWorld();
-          let waypointScreen: {
-            xPct: number;
-            yPct: number;
-            distance: number;
-            title: string;
-            stopId: string;
-          } | null = null;
-          let bestVisibleDist = Infinity;
 
-          for (const candidate of PORTFOLIO_STOPS) {
+          // Project 3D Affordance Markers for Projects, Jewels, Weapons & Active Enemies
+          const affordanceMarkers: WorldAffordanceMarker[] = [];
+
+          // 1) Project Sanctums (within 52m or tracked)
+          for (const stop of PORTFOLIO_STOPS) {
             const dist = Math.hypot(
-              candidate.position.x - playerState.x,
-              candidate.position.z - playerState.z
+              stop.position.x - playerState.x,
+              stop.position.z - playerState.z
             );
-            const stopY = groundHeightAt(candidate.position.x, candidate.position.z) + 5.6;
-            _projVec.set(candidate.position.x, stopY, candidate.position.z);
-            _projVec.project(camera);
-
+            if (dist > 52 && resolvedTracked?.id !== stop.id) continue;
+            const stopY = groundHeightAt(stop.position.x, stop.position.z) + 5.8;
+            _projVec.set(stop.position.x, stopY, stop.position.z).project(camera);
             if (_projVec.z >= -1 && _projVec.z <= 1) {
               const xPct = (_projVec.x * 0.5 + 0.5) * 100;
               const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 10 && xPct <= 90 && yPct >= 14 && yPct <= 82 && dist < bestVisibleDist) {
-                bestVisibleDist = dist;
-                waypointScreen = {
+              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
+                affordanceMarkers.push({
+                  id: stop.id,
+                  kind: 'project',
                   xPct,
                   yPct,
                   distance: Math.round(dist),
-                  title: candidate.title,
-                  stopId: candidate.id,
-                };
+                  title: `${stop.indexNumber}. ${stop.title}`,
+                  subtitle: visitedStopsNow.has(stop.id)
+                    ? '✓ AWAKENED · [E] OPEN CODEX'
+                    : '[E] INSPECT · [G] GRAPPLE',
+                  accentColor: stop.accentColor,
+                  completed: visitedStopsNow.has(stop.id),
+                });
               }
             }
+          }
+
+          // 2) Uncollected Career Experience Jewels (within 40m or tracked)
+          for (const relic of LOTUS_RELICS) {
+            if (collectedRelicsNow.has(relic.id)) continue;
+            const dist = Math.hypot(
+              relic.position.x - playerState.x,
+              relic.position.z - playerState.z
+            );
+            if (dist > 40 && resolvedTracked?.id !== relic.id) continue;
+            const rY = groundHeightAt(relic.position.x, relic.position.z) + 2.35;
+            _projVec.set(relic.position.x, rY, relic.position.z).project(camera);
+            if (_projVec.z >= -1 && _projVec.z <= 1) {
+              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
+              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
+              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
+                affordanceMarkers.push({
+                  id: relic.id,
+                  kind: 'jewel',
+                  xPct,
+                  yPct,
+                  distance: Math.round(dist),
+                  title: `${relic.company} (${relic.era})`,
+                  subtitle: 'WALK OVER TO COLLECT JEWEL',
+                  accentColor: '#c084fc',
+                });
+              }
+            }
+          }
+
+          // 3) Weapon Forges (within 36m or tracked)
+          for (const wf of FORGE_WEAPONS) {
+            const dist = Math.hypot(wf.position.x - playerState.x, wf.position.z - playerState.z);
+            if (dist > 36 && resolvedTracked?.id !== wf.id) continue;
+            const wY = groundHeightAt(wf.position.x, wf.position.z) + 3.1;
+            _projVec.set(wf.position.x, wY, wf.position.z).project(camera);
+            if (_projVec.z >= -1 && _projVec.z <= 1) {
+              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
+              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
+              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
+                const isEq = playerState.equippedWeaponId === wf.id;
+                affordanceMarkers.push({
+                  id: wf.id,
+                  kind: 'weapon',
+                  xPct,
+                  yPct,
+                  distance: Math.round(dist),
+                  title: wf.name,
+                  subtitle: isEq
+                    ? `★ EQUIPPED (+${wf.baseDamageBonus} ATK)`
+                    : `[E] EQUIP (+${wf.baseDamageBonus} ATK)`,
+                  accentColor: wf.colorHex,
+                  equipped: isEq,
+                });
+              }
+            }
+          }
+
+          // 4) Hostile Asura Enemies (within 28m — live decreasing HP & Posture bars!)
+          for (const demon of world.demons) {
+            if (!demon.alive) continue;
+            const dist = Math.hypot(demon.x - playerState.x, demon.z - playerState.z);
+            if (dist > 28) continue;
+            _projVec.set(demon.x, demon.y + 2.9, demon.z).project(camera);
+            if (_projVec.z >= -1 && _projVec.z <= 1) {
+              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
+              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
+              if (xPct >= 6 && xPct <= 94 && yPct >= 10 && yPct <= 88) {
+                affordanceMarkers.push({
+                  id: demon.id,
+                  kind: 'enemy',
+                  xPct,
+                  yPct,
+                  distance: Math.round(dist),
+                  title: demon.name,
+                  subtitle: demon.title,
+                  accentColor: '#f43f5e',
+                  hp: Math.round(demon.hp),
+                  maxHp: demon.maxHp,
+                  posture: Math.round(demon.posture),
+                  maxPosture: demon.maxPosture,
+                  aiState: demon.state,
+                });
+              }
+            }
+          }
+
+          // Keep the screen clean by sorting by distance, de-overlapping nearby badges, and showing up to 7 markers
+          affordanceMarkers.sort((a, b) => a.distance - b.distance);
+          const trimmedMarkers: WorldAffordanceMarker[] = [];
+          for (const candidate of affordanceMarkers) {
+            if (trimmedMarkers.length >= 7) break;
+            // Push apart badges that project too close together on screen
+            for (const placed of trimmedMarkers) {
+              if (Math.abs(candidate.xPct - placed.xPct) < 15 && Math.abs(candidate.yPct - placed.yPct) < 9.5) {
+                candidate.yPct = Math.max(14, placed.yPct - 10.5);
+              }
+            }
+            trimmedMarkers.push(candidate);
+          }
+
+          // Engaged Enemy Target Bar at Top-Center when actively fighting (within 7.2m, damaged, or attacking)
+          let engagedDemonHud: EngagedDemonTelemetry | null = null;
+          if (
+            engagedDemonEntity &&
+            (nearestDemonDist <= 7.2 ||
+              engagedDemonEntity.hp < engagedDemonEntity.maxHp ||
+              engagedDemonEntity.state === 'windup' ||
+              engagedDemonEntity.state === 'strike')
+          ) {
+            engagedDemonHud = {
+              id: engagedDemonEntity.id,
+              name: engagedDemonEntity.name,
+              title: engagedDemonEntity.title,
+              archetype: engagedDemonEntity.archetype,
+              hp: Math.round(engagedDemonEntity.hp),
+              maxHp: engagedDemonEntity.maxHp,
+              posture: Math.round(engagedDemonEntity.posture),
+              maxPosture: engagedDemonEntity.maxPosture,
+              aiState: engagedDemonEntity.state,
+              distance: Math.round(nearestDemonDist),
+            };
           }
 
           // Project active 3D combat damage popups to screen space
@@ -1703,7 +2133,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
 
-          // Determine current Story Act from Ayush's 5-Act Saga
           const storyChapter = boss.defeated
             ? STORY_CHAPTERS[4]
             : boss.awakened
@@ -1724,9 +2153,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             regionName: getRegionNameAt(playerState.x, playerState.z),
             nearStop,
             nearDistance: nearInfo.distance,
+            nearWeaponForge,
+            equippedWeaponId: playerState.equippedWeaponId,
+            equippedWeaponName: combatStats.equippedWeapon.name,
+            trackedTarget: resolvedTracked,
             distanceTraveled: playerState.distanceTraveled,
             playerHp: Math.round(playerState.hp),
             playerMaxHp: playerState.maxHp,
+            playerHurtFlash: playerState.hurtFlashTimer,
             stamina: Math.round(playerState.stamina),
             attackDamage: Math.round(combatStats.attackDamage * comboRank.damageMultiplier),
             unlockedPowersCount: combatStats.unlockedPowersCount,
@@ -1741,7 +2175,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             storyEra: storyChapter.era,
             storySummary: storyChapter.summary,
             aliveDemonsCount,
-            nearestDemonName: nearestDemonDist < 16 ? nearestDemonName : null,
+            nearestDemonName: nearestDemonDist < 18 ? nearestDemonName : null,
+            engagedDemon: engagedDemonHud,
             bossAwakened: boss.awakened,
             bossDefeated: boss.defeated,
             bossHp: Math.round(boss.hp),
@@ -1753,7 +2188,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             grappleTargetTitle: grappleCandidate ? grappleCandidate.stop.title : null,
             combatCallout: playerState.combatCallout,
             combatPopups: projectedPopups,
-            waypointScreen,
+            affordanceMarkers: trimmedMarkers,
+            waypointScreen: null,
           });
         }
       }
@@ -1795,7 +2231,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     <div
       ref={canvasMountRef}
       className="fixed inset-0 w-full h-full z-0 overflow-hidden bg-[#1a1009]"
-      aria-label="Aryavarta 3D Ancient India Portfolio World Viewport"
+      aria-label="Portfolio Verse 3D Interactive Action-RPG World Viewport"
     />
   );
 };

@@ -74,7 +74,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, gamepadConnec
           <div className="space-y-2">
             <div className="flex items-center gap-3 text-xs font-hud font-semibold tracking-[0.3em] uppercase text-[#d4af37]">
               <span className="h-px w-8 bg-[#d4af37]" />
-              <span>ARYAVARTA · INTERACTIVE ACTION-RPG PORTFOLIO</span>
+              <span>PORTFOLIO VERSE · INTERACTIVE ACTION-RPG PORTFOLIO</span>
             </div>
 
             <h1
@@ -84,18 +84,18 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, gamepadConnec
                 textShadow: '0 10px 40px rgba(0, 0, 0, 0.95)',
               }}
             >
-              AYUSH DUBEY
+              PORTFOLIO VERSE
             </h1>
 
             <p className="font-mythic italic text-xl md:text-2xl text-[#d4af37] tracking-wide pt-1">
-              Six Shipped Products, Four Career Eras &amp; The September Layoff Boss
+              Ayush Dubey — Six Shipped Products, Five Career Jewels &amp; Four Divine Weapons
             </p>
           </div>
 
           <p className="font-sans text-sm text-[#cbd5e1]/90 leading-relaxed max-w-md font-light">
-            Step into a living Ancient Indian highland valley as a Royal Sthapati Shinobi. Awaken
-            complete, self-contained product case studies inside carved temple sanctums to forge
-            Astra Katana powers and vanquish the boss symbolizing my September layoff.
+            Step into Portfolio Verse as a Royal Sthapati Shinobi. Ascend carved temple staircases,
+            wield four forged Astra weapons, awaken complete product case studies, and vanquish the
+            boss symbolizing the September layoff.
           </p>
 
           {/* AAA Console Vertical Blade Menu List */}
@@ -112,7 +112,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, gamepadConnec
             >
               <span className="flex items-center gap-3">
                 <span className="font-mono text-xs opacity-75">I.</span>
-                <span>Enter Aryavarta</span>
+                <span>Enter Portfolio Verse</span>
               </span>
               <span className="text-xs tracking-widest group-hover:translate-x-1 transition-transform">
                 START →

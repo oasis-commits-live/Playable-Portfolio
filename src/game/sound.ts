@@ -1,9 +1,9 @@
 /**
- * Studio-Grade Procedural Web Audio API Synthesizer & Adaptive Soundtrack Engine for Aryavarta.
+ * Studio-Grade Procedural Web Audio API Synthesizer & Adaptive Soundtrack Engine for Portfolio Verse.
  * - Master Bus with Sacred Temple Hall Stereo Delay/Reverb Space & Dynamics Limiter.
- * - Calm Exploration Mode: Raga Yaman Tanpura Shruti Drone + Plucked Sitar/Veena with sympathetic Jawari resonance + Bansuri Flute vibrato + soft Tabla pulse.
+ * - Calm Exploration Mode: Raga Yaman Tanpura Shruti Drone + Plucked Sitar/Veena with sympathetic Jawari resonance + Bansuri Flute vibrato + Santoor crystalline arpeggios + soft Tabla pulse.
  * - Fierce Combat / Boss Mode: Driving Sekiro/Rakshasa War-Taiko sub-drums + Tasha rim-shots + Bhairav Phrygian brass/shankha tension stabs.
- * - Tactile Foley & Combat SFX: Stereo-panned footsteps, Shinobi Shadow-Step Dash, 3-stage Katana combo harmonics, Sekiro deflect clangs, and Shinobi deathblows.
+ * - Tactile Foley & Combat SFX: Stereo-panned footsteps, Shinobi Shadow-Step Dash, 3-stage Katana combo harmonics, Sekiro deflect clangs, Perilous "危" attack warning stings, Player Hurt impacts, Weapon Forge anvil equip chimes, and Shinobi deathblows.
  */
 
 export type MusicMood = 'silent' | 'calm' | 'combat';
@@ -67,7 +67,7 @@ class SoundEngine {
     this.dryGain.connect(compressor);
 
     this.reverbSend = ctx.createGain();
-    this.reverbSend.gain.setValueAtTime(0.28, ctx.currentTime);
+    this.reverbSend.gain.setValueAtTime(0.32, ctx.currentTime);
 
     const delayL = ctx.createDelay(1.0);
     const delayR = ctx.createDelay(1.0);
@@ -76,12 +76,12 @@ class SoundEngine {
 
     const fbL = ctx.createGain();
     const fbR = ctx.createGain();
-    fbL.gain.setValueAtTime(0.36, ctx.currentTime);
-    fbR.gain.setValueAtTime(0.34, ctx.currentTime);
+    fbL.gain.setValueAtTime(0.38, ctx.currentTime);
+    fbR.gain.setValueAtTime(0.36, ctx.currentTime);
 
     const dampFilter = ctx.createBiquadFilter();
     dampFilter.type = 'lowpass';
-    dampFilter.frequency.setValueAtTime(2200, ctx.currentTime);
+    dampFilter.frequency.setValueAtTime(2400, ctx.currentTime);
 
     this.reverbSend.connect(dampFilter);
     dampFilter.connect(delayL);
@@ -126,7 +126,7 @@ class SoundEngine {
 
     if (mood === 'silent' || typeof window === 'undefined') return;
 
-    const intervalMs = mood === 'combat' ? 210 : 720;
+    const intervalMs = mood === 'combat' ? 195 : 640;
     this.stepIndex = 0;
     this.tickMusicPattern();
     this.musicTimer = window.setInterval(() => {
@@ -156,7 +156,7 @@ class SoundEngine {
       const degree = phrasePattern[step % phrasePattern.length];
       const noteFreq = ragaYaman[degree % ragaYaman.length];
 
-      // 1. Plucked Sitar / Veena with Jawari harmonic filter sweep on most steps
+      // 1. Plucked Sitar / Veena with Jawari harmonic filter sweep + sympathetic Taraf shimmer
       if (step % 2 === 0 || step % 5 === 0) {
         const sitarOsc = ctx.createOscillator();
         const shimmerOsc = ctx.createOscillator();
@@ -166,33 +166,46 @@ class SoundEngine {
         sitarOsc.type = 'sawtooth';
         shimmerOsc.type = 'triangle';
 
-        // Subtle Indian classical "Meend" (grace slide into the target pitch)
-        sitarOsc.frequency.setValueAtTime(noteFreq * 0.97, now);
-        sitarOsc.frequency.exponentialRampToValueAtTime(noteFreq, now + 0.08);
-
+        sitarOsc.frequency.setValueAtTime(noteFreq * 0.968, now);
+        sitarOsc.frequency.exponentialRampToValueAtTime(noteFreq, now + 0.085);
         shimmerOsc.frequency.setValueAtTime(noteFreq * 2.0, now);
 
         filter.type = 'bandpass';
-        filter.Q.setValueAtTime(3.2, now);
-        filter.frequency.setValueAtTime(noteFreq * 3.8, now);
-        filter.frequency.exponentialRampToValueAtTime(noteFreq * 1.4, now + 1.1);
+        filter.Q.setValueAtTime(3.0, now);
+        filter.frequency.setValueAtTime(noteFreq * 4.0, now);
+        filter.frequency.exponentialRampToValueAtTime(noteFreq * 1.4, now + 1.15);
 
         gain.gain.setValueAtTime(0.001, now);
-        gain.gain.linearRampToValueAtTime(0.028, now + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.0007, now + 1.45);
+        gain.gain.linearRampToValueAtTime(0.032, now + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0007, now + 1.5);
 
         sitarOsc.connect(filter);
         shimmerOsc.connect(filter);
         filter.connect(gain);
-        this.connectOutput(gain, 0.55);
+        this.connectOutput(gain, 0.58);
 
         sitarOsc.start(now);
         shimmerOsc.start(now);
-        sitarOsc.stop(now + 1.5);
-        shimmerOsc.stop(now + 1.5);
+        sitarOsc.stop(now + 1.55);
+        shimmerOsc.stop(now + 1.55);
       }
 
-      // 2. Expressive Bansuri Bamboo Flute sustained note every 4th step
+      // 2. Crystalline Santoor (Hammered Dulcimer) high shimmer arpeggio on off-steps
+      if (step % 3 === 1) {
+        const santoorFreq = ragaYaman[(degree + 4) % ragaYaman.length] * 2;
+        const santoor = ctx.createOscillator();
+        const sGain = ctx.createGain();
+        santoor.type = 'sine';
+        santoor.frequency.setValueAtTime(santoorFreq, now);
+        sGain.gain.setValueAtTime(0.015, now);
+        sGain.gain.exponentialRampToValueAtTime(0.0006, now + 0.85);
+        santoor.connect(sGain);
+        this.connectOutput(sGain, 0.68);
+        santoor.start(now);
+        santoor.stop(now + 0.9);
+      }
+
+      // 3. Expressive Bansuri Bamboo Flute sustained note every 4th step
       if (step % 4 === 1) {
         const fluteFreq = ragaYaman[(degree + 2) % ragaYaman.length];
         const flute = ctx.createOscillator();
@@ -202,21 +215,21 @@ class SoundEngine {
         const fFilter = ctx.createBiquadFilter();
 
         flute.type = 'sine';
-        flute.frequency.setValueAtTime(fluteFreq, now);
+        flute.frequency.setValueAtTime(fluteFreq * 0.985, now);
+        flute.frequency.exponentialRampToValueAtTime(fluteFreq, now + 0.14);
 
-        // Gentle 5.5Hz breath vibrato
         lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(5.5, now);
-        lfoGain.gain.setValueAtTime(3.2, now);
+        lfo.frequency.setValueAtTime(5.4, now);
+        lfoGain.gain.setValueAtTime(3.4, now);
         lfo.connect(lfoGain);
         lfoGain.connect(flute.frequency);
 
         fFilter.type = 'lowpass';
-        fFilter.frequency.setValueAtTime(1400, now);
+        fFilter.frequency.setValueAtTime(1450, now);
 
         fGain.gain.setValueAtTime(0.0008, now);
-        fGain.gain.linearRampToValueAtTime(0.022, now + 0.38);
-        fGain.gain.exponentialRampToValueAtTime(0.0006, now + 2.1);
+        fGain.gain.linearRampToValueAtTime(0.024, now + 0.36);
+        fGain.gain.exponentialRampToValueAtTime(0.0006, now + 2.2);
 
         flute.connect(fFilter);
         fFilter.connect(fGain);
@@ -224,11 +237,11 @@ class SoundEngine {
 
         flute.start(now);
         lfo.start(now);
-        flute.stop(now + 2.15);
-        lfo.stop(now + 2.15);
+        flute.stop(now + 2.25);
+        lfo.stop(now + 2.25);
       }
 
-      // 3. Warm Tanpura Shruti Drone (C3 / G3 fifth) every 4 steps
+      // 4. Warm Tanpura Shruti Drone (C3 / G3 fifth) every 4 steps
       if (step % 4 === 0) {
         const droneFreq = step % 8 === 0 ? 130.81 : 196.0;
         const drone1 = ctx.createOscillator();
@@ -239,19 +252,19 @@ class SoundEngine {
         drone1.type = 'triangle';
         drone2.type = 'sine';
         drone1.frequency.setValueAtTime(droneFreq, now);
-        drone2.frequency.setValueAtTime(droneFreq * 1.501, now); // Rich harmonic fifth shimmer
+        drone2.frequency.setValueAtTime(droneFreq * 1.501, now);
 
         dFilter.type = 'lowpass';
-        dFilter.frequency.setValueAtTime(520, now);
+        dFilter.frequency.setValueAtTime(540, now);
 
         dGain.gain.setValueAtTime(0.001, now);
-        dGain.gain.linearRampToValueAtTime(0.02, now + 0.7);
+        dGain.gain.linearRampToValueAtTime(0.022, now + 0.65);
         dGain.gain.exponentialRampToValueAtTime(0.0008, now + 3.1);
 
         drone1.connect(dFilter);
         drone2.connect(dFilter);
         dFilter.connect(dGain);
-        this.connectOutput(dGain, 0.5);
+        this.connectOutput(dGain, 0.52);
 
         drone1.start(now);
         drone2.start(now);
@@ -259,15 +272,15 @@ class SoundEngine {
         drone2.stop(now + 3.2);
       }
 
-      // 4. Soft Tabla / Bayan resonant pulse on gentle tal beats
+      // 5. Soft Tabla / Bayan resonant pulse on gentle tal beats
       if (step % 4 === 2) {
         const tabla = ctx.createOscillator();
         const tGain = ctx.createGain();
         tabla.type = 'sine';
-        tabla.frequency.setValueAtTime(112, now);
+        tabla.frequency.setValueAtTime(114, now);
         tabla.frequency.exponentialRampToValueAtTime(78, now + 0.18);
 
-        tGain.gain.setValueAtTime(0.018, now);
+        tGain.gain.setValueAtTime(0.02, now);
         tGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.22);
 
         tabla.connect(tGain);
@@ -276,7 +289,7 @@ class SoundEngine {
         tabla.stop(now + 0.24);
       }
     } else if (this.currentMood === 'combat') {
-      // Fierce Sekiro / Rakshasa War-Taiko Percussion & Bhairav Stabs (8-step bar at 210ms/step)
+      // Fierce Sekiro / Rakshasa War-Taiko Percussion & Bhairav Stabs (8-step bar at 195ms/step)
       const beatInBar = step % 8;
       const isHeavyTaiko = beatInBar === 0 || beatInBar === 3 || beatInBar === 6;
       const isRimClack = beatInBar === 2 || beatInBar === 4 || beatInBar === 7;
@@ -288,19 +301,19 @@ class SoundEngine {
 
         drum.type = 'triangle';
         sub.type = 'sine';
-        const startPitch = beatInBar === 0 ? 128 : 96;
+        const startPitch = beatInBar === 0 ? 132 : 98;
         drum.frequency.setValueAtTime(startPitch, now);
         drum.frequency.exponentialRampToValueAtTime(32, now + 0.21);
 
         sub.frequency.setValueAtTime(startPitch * 0.5, now);
         sub.frequency.exponentialRampToValueAtTime(24, now + 0.23);
 
-        dGain.gain.setValueAtTime(beatInBar === 0 ? 0.095 : 0.068, now);
+        dGain.gain.setValueAtTime(beatInBar === 0 ? 0.1 : 0.072, now);
         dGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
 
         drum.connect(dGain);
         sub.connect(dGain);
-        this.connectOutput(dGain, 0.22);
+        this.connectOutput(dGain, 0.24);
         drum.start(now);
         sub.start(now);
         drum.stop(now + 0.25);
@@ -312,13 +325,13 @@ class SoundEngine {
         const cFilter = ctx.createBiquadFilter();
         const cGain = ctx.createGain();
         clack.type = 'square';
-        clack.frequency.setValueAtTime(680 + beatInBar * 95, now);
-        clack.frequency.exponentialRampToValueAtTime(190, now + 0.045);
+        clack.frequency.setValueAtTime(720 + beatInBar * 95, now);
+        clack.frequency.exponentialRampToValueAtTime(195, now + 0.045);
 
         cFilter.type = 'bandpass';
-        cFilter.frequency.setValueAtTime(920, now);
+        cFilter.frequency.setValueAtTime(980, now);
 
-        cGain.gain.setValueAtTime(0.026, now);
+        cGain.gain.setValueAtTime(0.028, now);
         cGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
 
         clack.connect(cFilter);
@@ -343,16 +356,16 @@ class SoundEngine {
         overtone.frequency.setValueAtTime(stabFreq * 1.5, now);
 
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(860, now);
-        filter.frequency.exponentialRampToValueAtTime(320, now + 0.36);
+        filter.frequency.setValueAtTime(920, now);
+        filter.frequency.exponentialRampToValueAtTime(340, now + 0.36);
 
-        bGain.gain.setValueAtTime(0.032, now);
+        bGain.gain.setValueAtTime(0.034, now);
         bGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
 
         brass.connect(filter);
         overtone.connect(filter);
         filter.connect(bGain);
-        this.connectOutput(bGain, 0.38);
+        this.connectOutput(bGain, 0.4);
         brass.start(now);
         overtone.start(now);
         brass.stop(now + 0.4);
@@ -536,6 +549,89 @@ class SoundEngine {
   }
 
   /**
+   * Metallic Vishwakarma Forge anvil ring when equipping one of the 4 Divine Weapons
+   */
+  public playWeaponForgeEquip(slotIndex = 1): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const base = 360 + slotIndex * 65;
+    const ratios = [1, 1.498, 2.0, 3.0];
+
+    ratios.forEach((r, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = idx === 0 ? 'sawtooth' : 'sine';
+      osc.frequency.setValueAtTime(base * r, now);
+      osc.frequency.exponentialRampToValueAtTime(base * r * 1.03, now + 0.45);
+
+      gain.gain.setValueAtTime(0.08 / (idx + 1), now);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.48);
+
+      osc.connect(gain);
+      this.connectOutput(gain, 0.5);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    });
+  }
+
+  /**
+   * Sharp Sekiro "危" Perilous Attack warning cue when an Asura Demon winds up a strike
+   */
+  public playPerilousWarning(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'triangle';
+    osc1.frequency.setValueAtTime(587.33, now);
+    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.18);
+    osc2.frequency.setValueAtTime(622.25, now); // tense tritone/minor second shimmer
+    osc2.frequency.exponentialRampToValueAtTime(932.33, now + 0.18);
+
+    gain.gain.setValueAtTime(0.065, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    this.connectOutput(gain, 0.42);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.25);
+    osc2.stop(now + 0.25);
+  }
+
+  /**
+   * Visceral impact thud when an enemy strike hits the player
+   */
+  public playPlayerHurt(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(28, now + 0.22);
+
+    gain.gain.setValueAtTime(0.14, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+    osc.connect(gain);
+    this.connectOutput(gain, 0.2);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
+  /**
    * Astra Blade / Katana Combo Slash aerodynamic whoosh + steel harmonic ring
    */
   public playAstraStrike(powerLevel = 0, isNova = false, comboStage = 1): void {
@@ -566,7 +662,7 @@ class SoundEngine {
     gain.gain.setValueAtTime(isNova ? 0.14 : 0.095, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + (isNova ? 0.38 : 0.2));
 
-    ringGain.gain.setValueAtTime(0.025, now);
+    ringGain.gain.setValueAtTime(0.028, now);
     ringGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.16);
 
     osc.connect(gain);
