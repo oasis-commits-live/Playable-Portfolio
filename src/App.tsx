@@ -6,14 +6,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PORTFOLIO_STOPS, LOTUS_RELICS, LotusRelic } from './data/portfolioStops';
 import { TimeOfDay } from './game/proceduralScene';
+import { getNextWeatherPreset, resolveWeatherProfile, WeatherPresetId } from './game/weatherSystem';
 import { sound } from './game/sound';
 import { WorldCanvas, WorldControllerRef } from './components/WorldCanvas';
 import { TitleScreen } from './components/TitleScreen';
 import { HudOverlay, HudTelemetry } from './components/HudOverlay';
 import { StopModal } from './components/StopModal';
+import { LandscapeOrientationGate } from './components/MobileRpgPad';
 
 export default function App() {
-  const [gameState, setGameState] = useState<'title' | 'playing' | 'paused' | 'gameover'>(() => {
+  const [gameState, setGameState] = useState<
+    'title' | 'playing' | 'paused' | 'gameover' | 'player_died'
+  >(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('autostart') === '1') {
@@ -27,6 +31,7 @@ export default function App() {
   const [visitedStopIds, setVisitedStopIds] = useState<Set<string>>(() => new Set());
   const [collectedRelicIds, setCollectedRelicIds] = useState<Set<string>>(() => new Set());
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('dawn');
+  const [weatherPreset, setWeatherPreset] = useState<WeatherPresetId>('auto');
   const [muted, setMuted] = useState(false);
   const [gamepadConnected, setGamepadConnected] = useState(false);
   const [recentRelicToast, setRecentRelicToast] = useState<string | null>(null);
@@ -72,22 +77,21 @@ export default function App() {
     document.body.dataset.state = gameState;
   }, [gameState]);
 
-  // Announce the Layoff Boss awakening once all 6 Project Scrolls and 5 Career Relics are viewed
+  // Announce the Sky-Lightning Bolt & Layoff Boss awakening once all 6 Project Scrolls are viewed
   useEffect(() => {
     if (
       !bossAnnounced &&
       visitedStopIds.size >= PORTFOLIO_STOPS.length &&
-      collectedRelicIds.size >= LOTUS_RELICS.length &&
       !activeStopId
     ) {
       setBossAnnounced(true);
       sound.playBossAwaken();
       showToast(
-        'ALL 6 PROJECT POWERS & 5 RELICS AWAKENED! Fight "THE SEPTEMBER LAYOFF" Boss in the Northern Citadel [Press B]!',
-        6500
+        '⚡ ALL 6 PROJECTS SEEN! SUPER POWER UNLOCKED: Press [Z] to call down INDRA SKY-LIGHTNING BOLT & vanquish the Layoff Monster [B]!',
+        7000
       );
     }
-  }, [visitedStopIds, collectedRelicIds, activeStopId, bossAnnounced, showToast]);
+  }, [visitedStopIds, activeStopId, bossAnnounced, showToast]);
 
   const handleStartFromTitle = useCallback(() => {
     document.body.dataset.state = 'playing';
@@ -104,9 +108,16 @@ export default function App() {
         next.add(stopId);
         const stopObj = PORTFOLIO_STOPS.find((s) => s.id === stopId);
         if (stopObj) {
-          showToast(
-            `Astra Power Awakened: ${stopObj.unlockedPower.name} (+${stopObj.unlockedPower.bonusDamage} ATK)`
-          );
+          if (next.size >= PORTFOLIO_STOPS.length) {
+            showToast(
+              `⚡ 6/6 PROJECTS SEEN! SUPER POWER UNLOCKED: INDRA VAJRA SKY-LIGHTNING BOLT [Press Z]!`,
+              5500
+            );
+          } else {
+            showToast(
+              `Astra Power Awakened (${next.size}/6): ${stopObj.unlockedPower.name} (+${stopObj.unlockedPower.bonusDamage} ATK)`
+            );
+          }
         }
         return next;
       });
@@ -119,9 +130,13 @@ export default function App() {
     setActiveStopId(null);
   }, []);
 
-  const handleTeleportToStop = useCallback((stopId: string) => {
-    controllerRef.current?.teleportToStop(stopId);
-  }, []);
+  const handleTeleportToStop = useCallback(
+    (stopId: string) => {
+      controllerRef.current?.teleportToStop(stopId);
+      handleInspectStop(stopId);
+    },
+    [handleInspectStop]
+  );
 
   const handleCollectRelic = useCallback(
     (relic: LotusRelic) => {
@@ -142,10 +157,47 @@ export default function App() {
     setGameState('gameover');
   }, []);
 
-  const handleChangeTimeOfDay = useCallback((mode: TimeOfDay) => {
-    setTimeOfDay(mode);
-    controllerRef.current?.setTimeOfDay(mode);
+  const handlePlayerDied = useCallback(() => {
+    setActiveStopId(null);
+    setGameState('player_died');
   }, []);
+
+  const handleRestartFromBeginning = useCallback(() => {
+    setActiveStopId(null);
+    setVisitedStopIds(new Set());
+    setCollectedRelicIds(new Set());
+    setBossAnnounced(false);
+    controllerRef.current?.restartFromBeginning();
+    setGameState('playing');
+  }, []);
+
+  const handleChangeTimeOfDay = useCallback(
+    (mode: TimeOfDay) => {
+      setTimeOfDay(mode);
+      controllerRef.current?.setTimeOfDay(mode);
+      const profile = resolveWeatherProfile(mode, weatherPreset);
+      showToast(
+        `Atmosphere: ${mode === 'twilight' ? 'Dusk' : mode.toUpperCase()} · ${profile.title} (${profile.subtitle})`,
+        3200
+      );
+    },
+    [weatherPreset, showToast]
+  );
+
+  const handleChangeWeatherPreset = useCallback(
+    (preset: WeatherPresetId) => {
+      setWeatherPreset(preset);
+      controllerRef.current?.setWeatherPreset(preset);
+      const profile = resolveWeatherProfile(timeOfDay, preset);
+      showToast(
+        `Weather System: ${profile.title} (${
+          preset === 'auto' ? 'Auto Time-Synced' : 'Manual Mode'
+        })`,
+        3200
+      );
+    },
+    [timeOfDay, showToast]
+  );
 
   const handleToggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -204,11 +256,18 @@ export default function App() {
       }
       if (e.code === 'KeyM') {
         handleToggleMute();
+      } else if (e.code === 'KeyN') {
+        const order: TimeOfDay[] = ['dawn', 'noon', 'twilight'];
+        const nextMode = order[(order.indexOf(timeOfDay) + 1) % order.length];
+        handleChangeTimeOfDay(nextMode);
+      } else if (e.code === 'KeyG') {
+        const nextPreset = getNextWeatherPreset(weatherPreset);
+        handleChangeWeatherPreset(nextPreset);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleToggleMute]);
+  }, [handleToggleMute, timeOfDay, weatherPreset, handleChangeTimeOfDay, handleChangeWeatherPreset]);
 
   const activeStop = activeStopId
     ? PORTFOLIO_STOPS.find((s) => s.id === activeStopId) || null
@@ -227,6 +286,7 @@ export default function App() {
         onCloseStop={handleCloseStop}
         onCollectRelic={handleCollectRelic}
         onBossDefeated={handleBossDefeated}
+        onPlayerDied={handlePlayerDied}
         onTogglePause={handleTogglePause}
         onStartFromTitle={handleStartFromTitle}
         onGamepadStatusChange={setGamepadConnected}
@@ -235,10 +295,17 @@ export default function App() {
 
       {/* Title Screen Stage (Live 3D Spline Camera Tour in Background) */}
       {gameState === 'title' && (
-        <TitleScreen onStart={handleStartFromTitle} gamepadConnected={gamepadConnected} />
+        <TitleScreen
+          onStart={handleStartFromTitle}
+          onInspectProject={(stopId) => {
+            handleStartFromTitle();
+            handleTeleportToStop(stopId);
+          }}
+          gamepadConnected={gamepadConnected}
+        />
       )}
 
-      {/* Playing / Paused / Mastery HUD Shell */}
+      {/* Playing / Paused / Mastery / Player Died HUD Shell */}
       {gameState !== 'title' && (
         <HudOverlay
           gameState={gameState}
@@ -247,6 +314,7 @@ export default function App() {
           collectedRelicIds={collectedRelicIds}
           activeStopId={activeStopId}
           timeOfDay={timeOfDay}
+          weatherPreset={weatherPreset}
           muted={muted}
           gamepadConnected={gamepadConnected}
           recentRelicToast={recentRelicToast}
@@ -256,14 +324,17 @@ export default function App() {
           onEquipWeapon={(weaponId) => controllerRef.current?.equipWeapon(weaponId)}
           onSelectGuidanceTarget={(id, kind) => controllerRef.current?.setGuidanceTarget(id, kind)}
           onTriggerAttack={(isNova) => controllerRef.current?.triggerAttack(isNova)}
+          onTriggerLightningBolt={() => controllerRef.current?.triggerLightningBolt()}
           onTriggerParry={() => controllerRef.current?.triggerParryDeflect()}
           onTriggerDash={() => controllerRef.current?.triggerDodgeDash()}
           onTriggerGrapple={() => controllerRef.current?.triggerGrappleHook()}
           onSummonLayoffBoss={() => controllerRef.current?.summonLayoffBoss()}
           onChangeTimeOfDay={handleChangeTimeOfDay}
+          onChangeWeatherPreset={handleChangeWeatherPreset}
           onToggleMute={handleToggleMute}
           onTogglePause={handleTogglePause}
           onResetSpawn={handleResetSpawn}
+          onRestartFromBeginning={handleRestartFromBeginning}
           onReturnToTitle={handleReturnToTitle}
           onResumeFromMastery={handleResumeFromMastery}
           onVirtualMove={(f, r) => controllerRef.current?.setVirtualInput(f, r)}
@@ -282,6 +353,9 @@ export default function App() {
           onDispatchScroll={handleDispatchScroll}
         />
       )}
+
+      {/* Mobile Landscape-Only Orientation Enforcement Gate */}
+      <LandscapeOrientationGate />
     </main>
   );
 }

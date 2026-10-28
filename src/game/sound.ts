@@ -807,6 +807,86 @@ class SoundEngine {
       osc.stop(now + 0.7);
     });
   }
+
+  /**
+   * Colossal Indra Vajra Sky-Lightning Bolt crack + sub-bass thunder rumble
+   */
+  public playLightningThunderbolt(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    // High-voltage electric arc crack
+    const crackOsc = ctx.createOscillator();
+    const crackFilter = ctx.createBiquadFilter();
+    const crackGain = ctx.createGain();
+    crackOsc.type = 'sawtooth';
+    crackOsc.frequency.setValueAtTime(1680, now);
+    crackOsc.frequency.exponentialRampToValueAtTime(110, now + 0.28);
+
+    crackFilter.type = 'bandpass';
+    crackFilter.Q.setValueAtTime(2.2, now);
+    crackFilter.frequency.setValueAtTime(1400, now);
+    crackFilter.frequency.exponentialRampToValueAtTime(260, now + 0.32);
+
+    crackGain.gain.setValueAtTime(0.18, now);
+    crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    crackOsc.connect(crackFilter);
+    crackFilter.connect(crackGain);
+    this.connectOutput(crackGain, 0.65);
+    crackOsc.start(now);
+    crackOsc.stop(now + 0.36);
+
+    // Deep sub-bass thunder shockwave
+    const thunder = ctx.createOscillator();
+    const sub = ctx.createOscillator();
+    const tGain = ctx.createGain();
+    thunder.type = 'triangle';
+    sub.type = 'sine';
+    thunder.frequency.setValueAtTime(135, now);
+    thunder.frequency.exponentialRampToValueAtTime(24, now + 0.95);
+    sub.frequency.setValueAtTime(68, now);
+    sub.frequency.exponentialRampToValueAtTime(18, now + 1.05);
+
+    tGain.gain.setValueAtTime(0.22, now);
+    tGain.gain.exponentialRampToValueAtTime(0.0008, now + 1.08);
+
+    thunder.connect(tGain);
+    sub.connect(tGain);
+    this.connectOutput(tGain, 0.72);
+    thunder.start(now);
+    sub.start(now);
+    thunder.stop(now + 1.1);
+    sub.stop(now + 1.1);
+  }
+
+  /**
+   * Dramatic funeral gong knell when player health reaches 0
+   */
+  public playPlayerDeath(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const freqs = [82.41, 123.47, 164.81, 196.0];
+    freqs.forEach((f, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = idx % 2 === 0 ? 'sawtooth' : 'triangle';
+      osc.frequency.setValueAtTime(f, now);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.78, now + 1.6);
+
+      gain.gain.setValueAtTime(0.11 / (idx + 1), now);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.65);
+
+      osc.connect(gain);
+      this.connectOutput(gain, 0.65);
+      osc.start(now);
+      osc.stop(now + 1.7);
+    });
+  }
 }
 
 export const sound = new SoundEngine();
+

@@ -3,6 +3,7 @@ import {
   CREATOR_PROFILE,
   PORTFOLIO_STOPS,
   STORY_CHAPTERS,
+  INITIAL_DEMON_SPAWNS,
   PortfolioStop,
   LOTUS_RELICS,
   FORGE_WEAPONS,
@@ -10,7 +11,10 @@ import {
   ForgeWeapon,
 } from '../data/portfolioStops';
 import { TimeOfDay } from '../game/proceduralScene';
+import { WeatherPresetId } from '../game/weatherSystem';
 import { computeCompletionStats, computeCompassRibbonOffset } from '../game/worldLogic';
+import { MobileRpgControlPad } from './MobileRpgPad';
+import { ProceduralWeatherSystem } from './ProceduralWeatherSystem';
 
 const SHORT_STOP_LABELS: Record<string, string> = {
   'mandapa-origin': '01 Vera AI',
@@ -43,7 +47,7 @@ export interface CombatFloatingPopup {
 
 export interface WorldAffordanceMarker {
   id: string;
-  kind: 'project' | 'jewel' | 'weapon' | 'enemy';
+  kind: 'project' | 'jewel' | 'weapon' | 'enemy' | 'boss_hologram';
   xPct: number;
   yPct: number;
   distance: number;
@@ -117,6 +121,9 @@ export interface HudTelemetry {
   bossPosture?: number;
   bossMaxPosture?: number;
   bossName?: string;
+  lightningUnlocked?: boolean;
+  lightningCooldown?: number;
+  vanquishedDemonIds?: string[];
   isGliding?: boolean;
   grappleTargetTitle?: string | null;
   combatCallout?: string | null;
@@ -132,12 +139,13 @@ export interface HudTelemetry {
 }
 
 interface HudOverlayProps {
-  gameState: 'title' | 'playing' | 'paused' | 'gameover';
+  gameState: 'title' | 'playing' | 'paused' | 'gameover' | 'player_died';
   telemetry: HudTelemetry;
   visitedStopIds: Set<string>;
   collectedRelicIds: Set<string>;
   activeStopId: string | null;
   timeOfDay: TimeOfDay;
+  weatherPreset?: WeatherPresetId;
   muted: boolean;
   gamepadConnected: boolean;
   recentRelicToast: string | null;
@@ -147,14 +155,17 @@ interface HudOverlayProps {
   onEquipWeapon?: (weaponId: WeaponId) => void;
   onSelectGuidanceTarget?: (id: string, kind: 'project' | 'jewel' | 'weapon') => void;
   onTriggerAttack: (isNova?: boolean) => void;
+  onTriggerLightningBolt?: () => void;
   onTriggerParry: () => void;
   onTriggerDash?: () => void;
   onTriggerGrapple: () => void;
   onSummonLayoffBoss: () => void;
   onChangeTimeOfDay: (mode: TimeOfDay) => void;
+  onChangeWeatherPreset?: (preset: WeatherPresetId) => void;
   onToggleMute: () => void;
   onTogglePause: () => void;
   onResetSpawn: () => void;
+  onRestartFromBeginning: () => void;
   onReturnToTitle: () => void;
   onResumeFromMastery: () => void;
   onVirtualMove: (forward: number, right: number) => void;
@@ -168,6 +179,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   collectedRelicIds,
   activeStopId,
   timeOfDay,
+  weatherPreset = 'auto',
   muted,
   recentRelicToast,
   onInspectStop,
@@ -176,21 +188,46 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onEquipWeapon,
   onSelectGuidanceTarget,
   onTriggerAttack,
+  onTriggerLightningBolt,
   onTriggerParry,
   onTriggerDash,
   onTriggerGrapple,
   onSummonLayoffBoss,
   onChangeTimeOfDay,
+  onChangeWeatherPreset,
   onToggleMute,
   onTogglePause,
   onResetSpawn,
+  onRestartFromBeginning,
   onReturnToTitle,
   onResumeFromMastery,
+  onVirtualMove,
+  onVirtualJump,
 }) => {
-  const [sanctumBarExpanded, setSanctumBarExpanded] = useState(true);
+  const [sanctumBarExpanded, setSanctumBarExpanded] = useState(() =>
+    typeof window !== 'undefined' ? window.innerHeight >= 520 : true
+  );
   const [navCategory, setNavCategory] = useState<'projects' | 'jewels' | 'weapons'>('projects');
   const [storyDrawerOpen, setStoryDrawerOpen] = useState(false);
-  const [minimapVisible, setMinimapVisible] = useState(true);
+  const [summaryScrollOpen, setSummaryScrollOpen] = useState(false);
+  const [minimapVisible, setMinimapVisible] = useState(() =>
+    typeof window !== 'undefined' ? window.innerHeight >= 460 : true
+  );
+  const [controlPadVisible, setControlPadVisible] = useState(true);
+
+  useEffect(() => {
+    const syncCompactLandscape = () => {
+      if (window.innerHeight < 520) {
+        setSanctumBarExpanded(false);
+      }
+      if (window.innerHeight < 460) {
+        setMinimapVisible(false);
+      }
+    };
+    syncCompactLandscape();
+    window.addEventListener('resize', syncCompactLandscape);
+    return () => window.removeEventListener('resize', syncCompactLandscape);
+  }, []);
 
   // Delayed damage trail for Player HP, Engaged Enemy HP, and Boss HP
   const pranaValue = telemetry.playerHp ?? 320;
@@ -374,6 +411,27 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             );
           }
 
+          if (m.kind === 'boss_hologram') {
+            return (
+              <div
+                key={m.id}
+                data-testid="boss-lock-hologram-badge"
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20 flex flex-col items-center animate-pulse"
+                style={{ left: `${m.xPct}%`, top: `${m.yPct}%` }}
+              >
+                <div className="px-3.5 py-2 bg-[#04182b]/95 border-2 border-[#38bdf8] shadow-[0_0_28px_rgba(56,189,248,0.65)] backdrop-blur-md text-center max-w-[310px]">
+                  <div className="font-mono text-[9px] font-bold tracking-[0.2em] uppercase text-[#38bdf8]">
+                    {m.subtitle}
+                  </div>
+                  <div className="font-hud text-xs sm:text-sm font-bold text-[#fef08a] tracking-wide mt-0.5">
+                    “{m.title}”
+                  </div>
+                </div>
+                <div className="w-2.5 h-2.5 rotate-45 bg-[#38bdf8] -mt-1 border border-[#04182b]" />
+              </div>
+            );
+          }
+
           const badgeMeta =
             m.kind === 'project'
               ? {
@@ -421,11 +479,11 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 className={`group flex flex-col items-center cursor-pointer`}
               >
                 <div
-                  className={`px-2.5 py-1 ${badgeMeta.bg} border-l-2 ${badgeMeta.border} backdrop-blur-md shadow-[0_6px_20px_rgba(0,0,0,0.85)] group-hover:scale-105 transition-transform text-left`}
+                  className={`px-2 py-0.5 lg:px-2.5 lg:py-1 ${badgeMeta.bg} border-l-2 ${badgeMeta.border} backdrop-blur-md shadow-[0_6px_20px_rgba(0,0,0,0.85)] group-hover:scale-105 transition-transform text-left max-w-[175px] lg:max-w-none`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span
-                      className={`font-mono text-[8px] font-bold tracking-[0.18em] uppercase ${badgeMeta.tagColor}`}
+                      className={`font-mono text-[8px] font-bold tracking-[0.16em] uppercase ${badgeMeta.tagColor}`}
                     >
                       {badgeMeta.icon} {badgeMeta.tag}
                     </span>
@@ -433,10 +491,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                       {m.distance}m
                     </span>
                   </div>
-                  <div className="font-hud text-[11px] font-bold text-[#f8f5ee] tracking-wide whitespace-nowrap">
+                  <div className="font-hud text-[10px] lg:text-[11px] font-bold text-[#f8f5ee] tracking-wide truncate">
                     {m.title}
                   </div>
-                  <div className="font-mono text-[8px] text-[#94a3b8] uppercase tracking-wider">
+                  <div className="hidden lg:block font-mono text-[8px] text-[#94a3b8] uppercase tracking-wider">
                     {m.subtitle}
                   </div>
                 </div>
@@ -480,25 +538,25 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         ))}
 
       {/* 1. TOP-LEFT UNIFIED PORTFOLIO VERSE NAVIGATOR (PROJECTS · JEWELS · WEAPONS) */}
-      <div className="absolute top-5 left-6 flex flex-col gap-2 pointer-events-auto max-w-[460px]">
+      <div className="absolute top-3 left-4 lg:top-5 lg:left-6 flex flex-col gap-1.5 lg:gap-2 pointer-events-auto max-w-[310px] lg:max-w-[460px]">
         {/* Active Tale / Act Header with Left Golden Vertical Blade */}
-        <div className="flex items-center gap-3 pl-3 border-l-2 border-[#d4af37]">
+        <div className="flex items-center gap-3 pl-2.5 lg:pl-3 border-l-2 border-[#d4af37]">
           <div>
-            <div className="flex flex-wrap items-center gap-2 font-hud text-[11px] font-bold tracking-[0.2em] uppercase text-[#d4af37]">
+            <div className="flex flex-wrap items-center gap-1.5 lg:gap-2 font-hud text-[10px] lg:text-[11px] font-bold tracking-[0.16em] lg:tracking-[0.2em] uppercase text-[#d4af37]">
               <span>PORTFOLIO VERSE</span>
               <span>·</span>
               <span className="text-[#2dd4bf]">{stats.visitedStopsCount}/6 PROJECTS</span>
               <span>·</span>
               <span className="text-[#e879f9]">{stats.collectedRelicsCount}/5 JEWELS</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2.5 mt-0.5">
+            <div className="flex flex-wrap items-center gap-2 mt-0.5">
               <button
                 type="button"
                 onClick={(e) => {
                   e.currentTarget.blur();
                   setStoryDrawerOpen((prev) => !prev);
                 }}
-                className="font-mythic italic text-lg text-[#f8f5ee] hover:text-[#d4af37] transition-colors cursor-pointer leading-none"
+                className="font-mythic italic text-sm lg:text-lg text-[#f8f5ee] hover:text-[#d4af37] transition-colors cursor-pointer leading-none"
                 title="Open 5-Act Saga & September Layoff Chronicle [Key L]"
               >
                 {telemetry.storyTitle || 'The Builder’s Awakening'}
@@ -516,16 +574,41 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               {!telemetry.bossDefeated && (
                 <button
                   type="button"
+                  data-testid="summon-boss-btn"
                   onClick={(e) => {
                     e.currentTarget.blur();
                     onSummonLayoffBoss();
                   }}
-                  className="px-2 py-0.5 clip-blade-right bg-[#881337]/90 hover:bg-[#be123c] border-l-2 border-[#fda4af] font-hud text-[10px] font-bold tracking-[0.14em] uppercase text-[#ffe4e6] transition-all cursor-pointer"
-                  title="Challenge the September Layoff Boss [Key B]"
+                  className={`px-2 py-0.5 clip-blade-right border-l-2 font-hud text-[9px] lg:text-[10px] font-bold tracking-[0.14em] uppercase transition-all cursor-pointer ${
+                    visitedStopIds.size >= 6
+                      ? 'bg-[#881337]/90 hover:bg-[#be123c] border-[#fda4af] text-[#ffe4e6]'
+                      : 'bg-[#081b2e]/90 hover:bg-[#0e2a47] border-[#38bdf8] text-[#bae6fd]'
+                  }`}
+                  title={
+                    visitedStopIds.size >= 6
+                      ? 'Challenge the September Layoff Boss [Key B]'
+                      : `Unlock fight after seeing all the projects (${visitedStopIds.size}/6 seen) [Key B]`
+                  }
                 >
-                  {telemetry.bossAwakened ? 'Boss Active [B]' : 'Layoff Boss [B]'}
+                  {telemetry.bossAwakened
+                    ? '⚔ Boss Active [B]'
+                    : visitedStopIds.size >= 6
+                    ? '⚔ Challenge Boss [B]'
+                    : `🔒 Boss (${visitedStopIds.size}/6) [B]`}
                 </button>
               )}
+              <button
+                type="button"
+                data-testid="open-summary-scroll-btn"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setSummaryScrollOpen(true);
+                }}
+                className="px-2 py-0.5 clip-blade-right bg-[#0c1d2c]/90 hover:bg-[#16344d] border-l-2 border-[#2dd4bf] font-hud text-[9px] lg:text-[10px] font-bold tracking-[0.14em] uppercase text-[#ccfbf1] transition-all cursor-pointer"
+                title="Open World Exploration & Unseen Relics Summary Scroll"
+              >
+                📜 Summary Scroll
+              </button>
             </div>
           </div>
         </div>
@@ -602,6 +685,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                     <button
                       key={stop.id}
                       type="button"
+                      data-testid={`hud-project-btn-${stop.id}`}
                       onClick={(e) => {
                         e.currentTarget.blur();
                         onSelectGuidanceTarget?.(stop.id, 'project');
@@ -702,9 +786,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               e.currentTarget.blur();
               setSanctumBarExpanded(true);
             }}
-            className="pl-3 font-hud text-[11px] tracking-[0.18em] uppercase text-[#94a3b8] hover:text-[#d4af37] text-left cursor-pointer"
+            className="pl-2.5 lg:pl-3 font-hud text-[9px] lg:text-[11px] tracking-[0.16em] uppercase text-[#94a3b8] hover:text-[#d4af37] text-left cursor-pointer"
           >
-            + SHOW NAVIGATOR (PROJECTS · JEWELS · WEAPONS) [TAB]
+            + NAVIGATOR [TAB]
           </button>
         )}
 
@@ -747,9 +831,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       </div>
 
       {/* 2. TOP-CENTER FRAMELESS SKYLINE COMPASS + ENGAGED ASURA BAR / ELDEN RING BOSS BAR */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none hidden sm:flex flex-col items-center">
-        {/* Frameless Horizon Compass Ribbon */}
-        <div className="relative w-80 h-6 overflow-hidden flex items-center border-b border-[#d4af37]/30">
+      <div className="absolute top-3 lg:top-4 left-1/2 -translate-x-1/2 pointer-events-none flex flex-col items-center">
+        {/* Frameless Horizon Compass Ribbon (Desktop/Tablet >= 1024px) */}
+        <div className="relative w-80 h-6 overflow-hidden hidden lg:flex items-center border-b border-[#d4af37]/30">
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rotate-45 bg-[#d4af37] z-20" />
 
           {COMPASS_CARDINALS.map((c) => {
@@ -803,7 +887,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
         {/* Cinematic Region Discovery Callout */}
         {regionBannerText && !telemetry.bossAwakened && !engagedEnemy && (
-          <div className="mt-3 flex flex-col items-center animate-fade-in">
+          <div className="mt-1 lg:mt-3 hidden lg:flex flex-col items-center animate-fade-in">
             <span className="font-mythic italic text-lg text-[#d4af37] tracking-wide drop-shadow">
               {regionBannerText.split('·')[0].trim()}
             </span>
@@ -813,7 +897,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
         {/* Transient Combat / Paraglider Callout */}
         {telemetry.combatCallout && (
-          <div className="mt-2 px-4 py-0.5 bg-gradient-to-r from-transparent via-[#090e1a]/90 to-transparent border-y border-[#d4af37]/50 font-hud text-xs font-bold tracking-[0.2em] uppercase text-[#fef08a]">
+          <div className="mt-0.5 lg:mt-2 px-3 lg:px-4 py-0.5 bg-gradient-to-r from-transparent via-[#090e1a]/90 to-transparent border-y border-[#d4af37]/50 font-hud text-[9px] lg:text-xs font-bold tracking-[0.14em] lg:tracking-[0.2em] uppercase text-[#fef08a] max-w-[260px] lg:max-w-[540px] truncate text-center">
             {telemetry.combatCallout}
           </div>
         )}
@@ -913,26 +997,66 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 />
               </div>
             </div>
+
+            {/* ANIMATED BOSS FIGHT [Z] SKY-LIGHTNING BOLT AFFORDANCE PROMPT */}
+            <button
+              type="button"
+              data-testid="boss-lightning-prompt"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onTriggerLightningBolt?.();
+              }}
+              className="pointer-events-auto mt-1.5 w-full flex items-center justify-between gap-2.5 px-3.5 py-2 bg-gradient-to-r from-[#041d33]/95 via-[#073459]/95 to-[#041d33]/95 border-2 border-[#38bdf8] shadow-[0_0_26px_rgba(56,189,248,0.75)] hover:brightness-110 active:scale-[0.99] transition-all cursor-pointer animate-pulse"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="w-7 h-7 flex items-center justify-center bg-[#fef08a] text-[#05070b] font-mono font-extrabold text-xs border border-white shadow-[0_0_14px_rgba(254,240,138,0.95)] animate-bounce">
+                  [Z]
+                </span>
+                <div className="text-left">
+                  <div className="font-hud text-xs sm:text-sm font-bold tracking-[0.14em] uppercase text-[#fef08a] flex items-center gap-1.5">
+                    <span>⚡ PRESS [Z] TO STRIKE DOWN SKY-LIGHTNING BOLT!</span>
+                  </div>
+                  <div className="font-mono text-[9px] text-[#7dd3fc] tracking-wider uppercase">
+                    {telemetry.lightningCooldown && telemetry.lightningCooldown > 0
+                      ? `RECHARGING VAJRA BOLT (${telemetry.lightningCooldown.toFixed(1)}s)...`
+                      : 'CALLS DOWN INDRA THUNDERBOLT FROM ABOVE · -560 BOSS HP PER STRIKE'}
+                  </div>
+                </div>
+              </div>
+              <span className="px-2 py-1 bg-[#38bdf8] text-[#05070b] font-hud font-bold text-[10px] tracking-widest uppercase shrink-0">
+                STRIKE ⚡
+              </span>
+            </button>
           </div>
         )}
       </div>
 
       {/* 3. TOP-RIGHT SYSTEM GLYPHS, COLOR-CODED RADAR & KINETIC COMBO STYLE RANK */}
       <div className="absolute top-4 right-6 flex flex-col items-end gap-2.5 pointer-events-auto">
-        <div className="flex items-center gap-2 bg-[#060a12]/80 border-b border-[#d4af37]/35 px-2.5 py-1 backdrop-blur-md">
+        <div className="flex items-center gap-2 bg-[#060a12]/90 border-b border-[#d4af37]/35 px-2.5 py-1">
           <button
             type="button"
             tabIndex={-1}
+            data-testid="cycle-time-of-day-btn"
             onClick={(e) => {
               e.currentTarget.blur();
               cycleTimeOfDay();
             }}
-            title={`Atmosphere: ${timeOfDay} (Click to cycle)`}
+            title={`Time of Day: ${timeOfDay} (Click or press [N] to cycle)`}
             className="px-2 h-6 font-hud text-xs font-bold tracking-[0.16em] uppercase text-[#d4af37] hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
           >
             <span className="w-1.5 h-1.5 rotate-45 bg-[#d4af37]" />
             <span>{timeOfDay === 'twilight' ? 'Dusk' : timeOfDay}</span>
           </button>
+
+          <span className="text-[#d4af37]/25">|</span>
+
+          <ProceduralWeatherSystem
+            timeOfDay={timeOfDay}
+            weatherPreset={weatherPreset}
+            onChangeTimeOfDay={onChangeTimeOfDay}
+            onChangeWeatherPreset={(preset) => onChangeWeatherPreset?.(preset)}
+          />
 
           <span className="text-[#d4af37]/25">|</span>
 
@@ -949,6 +1073,23 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             }`}
           >
             Radar
+          </button>
+
+          <span className="text-[#d4af37]/25">|</span>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              setControlPadVisible((prev) => !prev);
+            }}
+            title="Toggle On-Screen RPG Control Pad"
+            className={`px-1.5 h-6 font-hud text-xs font-bold tracking-[0.16em] uppercase transition-colors cursor-pointer ${
+              controlPadVisible ? 'text-[#d4af37]' : 'text-[#94a3b8] hover:text-white'
+            }`}
+          >
+            Pad
           </button>
 
           <span className="text-[#d4af37]/25">|</span>
@@ -1104,17 +1245,17 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
       {/* Proximity Sanctum Scroll OR Weapon Forge Interaction Callout */}
       {!activeStopId && gameState === 'playing' && (telemetry.nearStop || telemetry.nearWeaponForge) && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto flex flex-col items-center gap-2">
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto flex flex-col items-center gap-1.5 z-20">
           {telemetry.nearStop && (
             <button
               type="button"
               onClick={() => onInspectStop(telemetry.nearStop!.id)}
-              className="flex items-center gap-3 px-5 py-2 clip-blade-right bg-[#070b14]/95 border-l-2 border-[#d4af37] hover:bg-[#101829] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-2.5 px-4 py-1.5 clip-blade-right bg-[#070b14]/95 border-l-2 border-[#d4af37] hover:bg-[#101829] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              <span className="px-2 py-0.5 bg-[#d4af37] text-[#05070b] font-hud font-bold text-xs tracking-wider uppercase">
+              <span className="px-2 py-0.5 bg-[#d4af37] text-[#05070b] font-hud font-bold text-[11px] tracking-wider uppercase">
                 [E] INSPECT PROJECT CODEX
               </span>
-              <span className="font-mythic italic text-base text-[#f8f5ee]">
+              <span className="font-mythic italic text-sm sm:text-base text-[#f8f5ee]">
                 {telemetry.nearStop.title}
               </span>
             </button>
@@ -1123,12 +1264,12 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             <button
               type="button"
               onClick={() => onEquipWeapon?.(telemetry.nearWeaponForge!.id)}
-              className="flex items-center gap-3 px-5 py-1.5 clip-blade-right bg-[#091524]/95 border-l-2 border-[#38bdf8] hover:bg-[#12253d] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-2.5 px-4 py-1.5 clip-blade-right bg-[#091524]/95 border-l-2 border-[#38bdf8] hover:bg-[#12253d] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              <span className="px-2 py-0.5 bg-[#38bdf8] text-[#05070b] font-hud font-bold text-xs tracking-wider uppercase">
+              <span className="px-2 py-0.5 bg-[#38bdf8] text-[#05070b] font-hud font-bold text-[11px] tracking-wider uppercase">
                 [E] EQUIP DIVINE WEAPON
               </span>
-              <span className="font-hud text-sm font-bold text-[#e0f2fe]">
+              <span className="font-hud text-xs sm:text-sm font-bold text-[#e0f2fe]">
                 {telemetry.nearWeaponForge.name} (+{telemetry.nearWeaponForge.baseDamageBonus} ATK)
               </span>
             </button>
@@ -1136,12 +1277,12 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         </div>
       )}
 
-      {/* 5. BOTTOM-LEFT AAA HERO VITALS, SUDARSHANA MEDALLION & EQUIPPED WEAPON BAR */}
-      {gameState === 'playing' && (
-        <div className="fixed bottom-5 left-6 z-20 flex items-end gap-3 pointer-events-auto">
+      {/* 5. BOTTOM-CENTER AAA HERO VITALS, SUDARSHANA MEDALLION & EQUIPPED WEAPON BAR */}
+      {gameState === 'playing' && !activeStopId && (
+        <div className="fixed bottom-2.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 px-3 py-1.5 bg-[#050811]/88 border border-[#d4af37]/35 backdrop-blur-md shadow-[0_12px_32px_rgba(0,0,0,0.85)] pointer-events-auto">
           {/* Sacred 6-Petal Sudarshana Chakra SVG Medallion */}
-          <div className="relative w-14 h-14 flex items-center justify-center shrink-0 pointer-events-none">
-            <svg width="56" height="56" viewBox="0 0 64 64" className="w-full h-full">
+          <div className="relative w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center shrink-0 pointer-events-none">
+            <svg width="48" height="48" viewBox="0 0 64 64" className="w-full h-full">
               <circle
                 cx="32"
                 cy="32"
@@ -1175,21 +1316,21 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="font-hud text-xs font-bold text-[#fef08a] leading-none">{attackDmg}</span>
-              <span className="font-mono text-[7px] text-[#d4af37] uppercase">ATK</span>
+              <span className="font-hud text-[11px] font-bold text-[#fef08a] leading-none">{attackDmg}</span>
+              <span className="font-mono text-[6px] text-[#d4af37] uppercase">ATK</span>
             </div>
           </div>
 
           {/* Tapered Prana & Stamina Blade Bars + Quick Weapon Switcher [1-4] */}
-          <div className="flex flex-col gap-1.5 pb-0.5">
-            <div className="flex items-center justify-between gap-4 font-hud text-[11px] tracking-[0.16em] uppercase pointer-events-none">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-3 font-hud text-[10px] tracking-[0.14em] uppercase pointer-events-none">
               <span className="text-[#f8f5ee] font-bold">
                 PRANA{' '}
                 <span className="text-[#fda4af] tabular-nums">
                   {pranaValue}/{pranaMax}
                 </span>
               </span>
-              <span className="text-[#38bdf8] font-bold">
+              <span className="text-[#38bdf8] font-bold truncate max-w-[145px] sm:max-w-[190px]">
                 ⚔ {telemetry.equippedWeaponName || 'Nandaka Sovereign Katana'}
               </span>
             </div>
@@ -1197,7 +1338,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             {/* Double-Layer Health Blade Bar with Delayed White-Gold Trail */}
             <div
               data-testid="player-hp-bar"
-              className="relative w-56 sm:w-68 h-2.5 clip-blade-right bg-[#1a070e]/90 border-l-2 border-[#d4af37] overflow-hidden pointer-events-none"
+              className="relative w-48 sm:w-60 h-2 clip-blade-right bg-[#1a070e]/90 border-l-2 border-[#d4af37] overflow-hidden pointer-events-none"
             >
               <div
                 className="absolute inset-y-0 left-0 bg-[#fef08a]/85 transition-all duration-500"
@@ -1210,111 +1351,158 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </div>
 
             {/* Celadon Stamina / Spirit Gauge */}
-            <div className="w-44 sm:w-52 h-1.5 clip-blade-right bg-[#061c1b]/90 border-l-2 border-[#2dd4bf] overflow-hidden pointer-events-none">
+            <div className="w-40 sm:w-48 h-1 clip-blade-right bg-[#061c1b]/90 border-l-2 border-[#2dd4bf] overflow-hidden pointer-events-none">
               <div
                 className="h-full bg-gradient-to-r from-[#0d9488] to-[#2dd4bf] transition-all duration-100"
                 style={{ width: `${staminaPct}%` }}
               />
             </div>
-
-            {/* 4-Weapon Armory Hotbar [Keys 1 - 4] */}
-            <div className="flex items-center gap-1 pt-0.5">
-              {FORGE_WEAPONS.map((w, idx) => {
-                const active = equippedWeaponId === w.id;
-                return (
-                  <button
-                    key={w.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.currentTarget.blur();
-                      onEquipWeapon?.(w.id);
-                    }}
-                    className={`px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider cursor-pointer transition-all border ${
-                      active
-                        ? 'bg-[#d4af37] text-[#05070b] border-[#fef08a] font-bold'
-                        : 'bg-[#070b14]/85 text-[#94a3b8] border-[#d4af37]/30 hover:text-white'
-                    }`}
-                    title={`Press [${idx + 1}] to equip ${w.name} (${w.category})`}
-                  >
-                    [{idx + 1}] {w.name.split(' ')[0]}
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
       )}
 
-      {/* 6. BOTTOM-RIGHT TACTICAL COMBAT STANCE & SKILL CLUSTER */}
-      {gameState === 'playing' && (
-        <div className="fixed bottom-5 right-6 z-20 hidden md:flex items-center gap-2 pointer-events-auto">
+      {/* 5B. RIGHT-HAND SIDE SWORD & WEAPON SELECTION LEGEND (KEYS 1–4 + [Z] SKY-LIGHTNING) */}
+      {gameState === 'playing' && !activeStopId && (
+        <aside
+          data-testid="right-weapon-legend"
+          aria-label="Sword and Weapon Selection Legend"
+          className="fixed right-3 lg:right-5 top-1/2 -translate-y-1/2 z-20 pointer-events-auto flex flex-col gap-1.5 w-[178px] sm:w-[215px] bg-[#050914]/92 border-r-2 border-y border-l border-[#d4af37]/55 p-2.5 backdrop-blur-md shadow-[0_14px_36px_rgba(0,0,0,0.9)]"
+        >
+          <div className="flex items-center justify-between border-b border-[#d4af37]/30 pb-1">
+            <span className="font-hud text-[10px] sm:text-[11px] font-bold tracking-[0.16em] uppercase text-[#d4af37]">
+              ⚔ SWORD LEGEND
+            </span>
+            <span className="font-mono text-[8px] sm:text-[9px] text-[#38bdf8] uppercase">
+              KEYS [1–4]
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            {FORGE_WEAPONS.map((w, idx) => {
+              const active = equippedWeaponId === w.id;
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  data-testid={`weapon-legend-btn-${idx + 1}`}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onEquipWeapon?.(w.id);
+                  }}
+                  className={`group w-full flex items-center justify-between gap-1.5 px-2 py-1.5 text-left transition-all cursor-pointer border ${
+                    active
+                      ? 'bg-gradient-to-r from-[#d4af37] via-[#f59e0b] to-[#d4af37] text-[#05070b] border-[#fef08a] shadow-[0_0_14px_rgba(212,175,55,0.45)]'
+                      : 'bg-[#08101f]/90 hover:bg-[#111e36] text-[#e2e8f0] border-[#d4af37]/25 hover:border-[#d4af37]/75'
+                  }`}
+                  title={`Press Key [${idx + 1}] or Click to equip ${w.name} (${w.category})`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`w-5 h-5 flex items-center justify-center font-mono text-[10px] font-bold shrink-0 border ${
+                        active
+                          ? 'bg-[#05070b] text-[#fef08a] border-[#05070b]'
+                          : 'bg-[#04070e] text-[#d4af37] border-[#d4af37]/40'
+                      }`}
+                    >
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <div
+                        className={`font-hud text-[10px] sm:text-[11px] font-bold tracking-wide truncate ${
+                          active ? 'text-[#05070b]' : 'text-[#f8f5ee]'
+                        }`}
+                      >
+                        {w.name.split(' ').slice(0, 2).join(' ')}
+                      </div>
+                      <div
+                        className={`font-mono text-[8px] uppercase tracking-wider truncate ${
+                          active ? 'text-[#05070b]/80 font-bold' : 'text-[#94a3b8]'
+                        }`}
+                      >
+                        {w.category.split(' ').slice(-1)[0]} · +{w.baseDamageBonus} ATK
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={`font-mono text-[8px] font-bold uppercase px-1 py-0.5 shrink-0 ${
+                      active
+                        ? 'bg-[#05070b] text-[#fef08a]'
+                        : 'text-[#38bdf8] group-hover:text-[#fef08a]'
+                    }`}
+                  >
+                    {active ? 'ACTIVE' : 'EQUIP'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Unlockable Super Power: INDRA VAJRA SKY-LIGHTNING BOLT [Key Z] */}
           <button
             type="button"
+            data-testid="hud-lightning-bolt-btn"
             onClick={(e) => {
               e.currentTarget.blur();
-              onTriggerAttack(false);
+              onTriggerLightningBolt?.();
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#080d18]/88 hover:bg-[#162038] border-l-2 border-[#d4af37] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#f8f5ee] cursor-pointer transition-all"
-            title="Weapon 3-Hit Combo [Left-Click or F]"
+            className={`mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1.5 font-hud text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all border ${
+              visitedStopIds.size >= 6
+                ? 'bg-gradient-to-r from-[#0284c7] via-[#38bdf8] to-[#fef08a] text-[#05070b] border-white shadow-[0_0_16px_rgba(56,189,248,0.85)] animate-pulse'
+                : 'bg-[#071120]/90 text-[#7dd3fc] border-[#38bdf8]/40 hover:border-[#38bdf8]'
+            }`}
+            title={
+              visitedStopIds.size >= 6
+                ? 'Strike Sky-Lightning Bolt from above to crush the Layoff Monster [Key Z]'
+                : `Inspect all 6 Project Sanctums (${visitedStopIds.size}/6) to unlock the Sky-Lightning Bolt Super Power [Key Z]`
+            }
           >
-            <span className="text-[#d4af37]">LMB</span>
-            <span>Slash</span>
+            <span className="flex items-center gap-1.5 truncate">
+              <span className="px-1 py-0.2 bg-[#05070b] text-[#fef08a] font-mono text-[9px] font-bold">
+                [Z]
+              </span>
+              <span className="truncate">
+                {visitedStopIds.size >= 6
+                  ? '⚡ SKY-LIGHTNING'
+                  : `🔒 LIGHTNING (${visitedStopIds.size}/6)`}
+              </span>
+            </span>
+            <span className="font-mono text-[8px]">
+              {visitedStopIds.size >= 6 ? 'READY' : 'LOCKED'}
+            </span>
           </button>
+        </aside>
+      )}
 
-          <button
-            type="button"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              onTriggerParry();
-            }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#080d18]/88 hover:bg-[#162038] border-l-2 border-[#fef08a] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#fef08a] cursor-pointer transition-all"
-            title="Sekiro Deflect [Right-Click or V]"
-          >
-            <span className="text-[#d4af37]">RMB</span>
-            <span>Deflect</span>
-          </button>
-
-          {onTriggerDash && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onTriggerDash();
-              }}
-              className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#080d18]/88 hover:bg-[#162038] border-l-2 border-[#38bdf8] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#bae6fd] cursor-pointer transition-all"
-              title="Shinobi Shadow-Step Dash with i-frames [Shift or X]"
-            >
-              <span className="text-[#38bdf8]">SHIFT</span>
-              <span>Dash</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              onTriggerGrapple();
-            }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#080d18]/88 hover:bg-[#162038] border-l-2 border-[#2dd4bf] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#ccfbf1] cursor-pointer transition-all"
-            title="Grapple Hook [Key G]"
-          >
-            <span className="text-[#2dd4bf]">G</span>
-            <span>Grapple</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              onTriggerAttack(true);
-            }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 clip-blade-right bg-[#1f0812]/90 hover:bg-[#380e20] border-l-2 border-[#f43f5e] font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#fecdd3] cursor-pointer transition-all"
-            title="Surya Whirlwind Nova [Key Q]"
-          >
-            <span className="text-[#f43f5e]">Q</span>
-            <span>Nova</span>
-          </button>
-        </div>
+      {/* 6. ON-SCREEN MOBILE ACTION-RPG CONTROL PAD (LEFT VIRTUAL ANALOG JOYSTICK + RIGHT RADIAL SKILL WHEEL) */}
+      {gameState === 'playing' && !activeStopId && controlPadVisible && (
+        <MobileRpgControlPad
+          onVirtualMove={onVirtualMove}
+          onVirtualJump={onVirtualJump}
+          onTriggerAttack={onTriggerAttack}
+          onTriggerLightningBolt={onTriggerLightningBolt}
+          onTriggerParry={onTriggerParry}
+          onTriggerDash={onTriggerDash}
+          onTriggerGrapple={onTriggerGrapple}
+          onInteractContext={
+            telemetry.nearStop
+              ? () => onInspectStop(telemetry.nearStop!.id)
+              : telemetry.nearWeaponForge
+              ? () => onEquipWeapon?.(telemetry.nearWeaponForge!.id)
+              : undefined
+          }
+          contextActionLabel={
+            telemetry.nearStop
+              ? 'INSPECT'
+              : telemetry.nearWeaponForge
+              ? 'EQUIP'
+              : null
+          }
+          comboStage={telemetry.comboStage}
+          grappleAvailable={Boolean(telemetry.grappleTargetTitle)}
+          isGliding={Boolean(telemetry.isGliding)}
+          lightningUnlocked={visitedStopIds.size >= 6}
+          unlockedProjectsCount={visitedStopIds.size}
+        />
       )}
 
       {/* Pause Modal Card */}
@@ -1395,62 +1583,409 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         </div>
       )}
 
-      {/* Victory / September Layoff Vanquished Modal Card */}
-      {gameState === 'gameover' && (
+      {/* TRUE PLAYER DEATH / GAME OVER MODAL — Forces Full Restart from the Beginning */}
+      {gameState === 'player_died' && (
         <div
+          data-testid="player-died-modal"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="mastery-modal-title"
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#04060b]/90 backdrop-blur-md pointer-events-auto"
+          aria-labelledby="player-died-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#090205]/95 backdrop-blur-xl pointer-events-auto"
         >
-          <div className="w-full max-w-md bg-[#070b14] border border-[#d4af37] p-6 text-[#f4efe6] space-y-4 shadow-2xl">
-            <div>
-              <div className="text-xs font-hud font-bold text-[#2dd4bf] uppercase tracking-[0.24em]">
-                PORTFOLIO VERSE · SEPTEMBER LAYOFF VANQUISHED
-              </div>
-              <h2 id="mastery-modal-title" className="font-display text-2xl font-bold text-[#f8f5ee] mt-1">
-                Resilience Forged Through 6 Shipped Products
-              </h2>
-              <p className="text-xs text-[#cbd5e1] mt-1.5 leading-relaxed">
-                A sudden workforce reduction in September ended Ayush Dubey’s chapter at Cheggout,
-                but his 0→1 craft and $3M ARR impact endure across Portfolio Verse.
-              </p>
+          <div className="w-full max-w-lg bg-[#0d0509] border-2 border-[#e11d48] p-6 sm:p-8 text-[#f8f5ee] space-y-5 shadow-[0_0_60px_rgba(225,29,72,0.45)] text-center">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#2e0714] border border-[#f43f5e]/60 font-hud text-[11px] font-bold tracking-[0.26em] uppercase text-[#fda4af]">
+              <span>死 · PRANA EXTINGUISHED IN COMBAT</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 font-hud text-xs uppercase tracking-wider">
-              <a
-                href={CREATOR_PROFILE.calUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2.5 clip-blade-right bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-bold text-center cursor-pointer"
-              >
-                Book Call with Ayush
-              </a>
-              <a
-                href={CREATOR_PROFILE.resumeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2.5 border border-[#d4af37] bg-[#0c1322] hover:bg-[#172338] text-[#f8f5ee] font-bold text-center cursor-pointer"
-              >
-                Resume (PDF)
-              </a>
+            <h2
+              id="player-died-title"
+              className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-[#ffe4e6]"
+            >
+              YOU HAVE FALLEN
+            </h2>
+
+            <p className="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed max-w-md mx-auto">
+              Your Prana vitality dropped to zero against the Corporate Asuras of Portfolio Verse.
+              Hint: Inspect all <strong className="text-[#fef08a]">6 Project Sanctums</strong> to
+              unlock the <strong className="text-[#38bdf8]">⚡ Indra Vajra Sky-Lightning Bolt [Key Z]</strong>{' '}
+              and use <strong className="text-[#2dd4bf]">[RMB / V] Sekiro Deflect</strong> to shatter enemy posture!
+            </p>
+
+            <div className="p-3 bg-[#190810] border border-[#f43f5e]/30 text-left font-mono text-[11px] text-[#fda4af] space-y-1">
+              <div>• Projects Awakened before fall: {visitedStopIds.size} / 6</div>
+              <div>• Career Jewels Collected before fall: {collectedRelicIds.size} / 5</div>
+              <div>• Corporate Asuras Vanquished: {6 - aliveDemons} / 6</div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#d4af37]/20 font-hud text-xs uppercase tracking-wider">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3 font-hud text-xs uppercase tracking-[0.18em]">
+              <button
+                type="button"
+                data-testid="restart-from-beginning-btn"
+                onClick={onRestartFromBeginning}
+                className="w-full sm:w-auto px-6 py-3 clip-blade-right bg-gradient-to-r from-[#e11d48] via-[#f43f5e] to-[#be123c] hover:brightness-110 text-white font-extrabold cursor-pointer shadow-[0_10px_28px_rgba(225,29,72,0.5)]"
+              >
+                ↻ RESTART FROM THE BEGINNING
+              </button>
               <button
                 type="button"
                 onClick={onReturnToTitle}
-                className="px-3.5 py-1.5 border border-[#d4af37]/35 bg-[#0c1322] text-[#cbd5e1] cursor-pointer"
+                className="w-full sm:w-auto px-4 py-3 border border-[#f43f5e]/40 bg-[#14070d] hover:bg-[#240b16] text-[#fda4af] font-bold cursor-pointer"
               >
                 Title Screen
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POST-COMPLETION SUMMARY SCROLL MODAL (Shows Seen & Unlocked vs. Still Left Unseen to Explore) */}
+      {(gameState === 'gameover' || summaryScrollOpen) && (
+        <div
+          data-testid="summary-scroll-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mastery-modal-title"
+          className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-[#04060b]/92 backdrop-blur-xl pointer-events-auto"
+        >
+          <div className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-[#070b14] border-2 border-[#d4af37] text-[#f4efe6] shadow-[0_24px_70px_rgba(0,0,0,0.95)] overflow-hidden">
+            {/* Scroll Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-[#130d04] via-[#0c1322] to-[#130d04] border-b border-[#d4af37]/40 flex items-start justify-between gap-4 shrink-0">
+              <div>
+                <div className="text-[10px] sm:text-xs font-hud font-bold text-[#2dd4bf] uppercase tracking-[0.24em]">
+                  {telemetry.bossDefeated
+                    ? '📜 ROYAL SUMMARY SCROLL · SEPTEMBER LAYOFF VANQUISHED!'
+                    : '📜 ROYAL SUMMARY SCROLL · PORTFOLIO VERSE CHRONICLE'}
+                </div>
+                <h2
+                  id="mastery-modal-title"
+                  className="font-display text-xl sm:text-2xl font-extrabold text-[#fef08a] mt-0.5"
+                >
+                  What You Saw &amp; Unlocked — And What Still Awaits in the Verse
+                </h2>
+                <p className="text-xs text-[#cbd5e1] mt-1">
+                  Review every Project Sanctum, Career Jewel, Divine Weapon, and Corporate Asura you
+                  have conquered—or teleport directly to anything still left unseen.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={onResumeFromMastery}
-                className="px-4 py-1.5 clip-blade-right bg-[#0d9488] hover:bg-[#14b8a6] text-[#f8f5ee] font-bold cursor-pointer"
+                onClick={() => {
+                  setSummaryScrollOpen(false);
+                  if (gameState === 'gameover') {
+                    onResumeFromMastery();
+                  }
+                }}
+                className="px-2.5 py-1 border border-[#d4af37]/45 bg-[#0c1322] hover:bg-[#172540] font-mono text-xs text-[#fef08a] cursor-pointer shrink-0"
               >
-                Continue Exploring
+                [ESC · CLOSE]
               </button>
+            </div>
+
+            {/* Scrollable Body: Seen & Unlocked vs. Still Left Unseen */}
+            <div className="p-5 overflow-y-auto space-y-5 text-xs">
+              {/* Top Completion Telemetry Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#2dd4bf]">
+                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Project Sanctums</div>
+                  <div className="font-hud text-base font-extrabold text-[#2dd4bf]">
+                    {visitedStopIds.size} / {PORTFOLIO_STOPS.length} Seen
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#c084fc]">
+                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Career Jewels</div>
+                  <div className="font-hud text-base font-extrabold text-[#e879f9]">
+                    {collectedRelicIds.size} / {LOTUS_RELICS.length} Collected
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#38bdf8]">
+                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Sky-Lightning Power</div>
+                  <div className="font-hud text-base font-extrabold text-[#38bdf8]">
+                    {visitedStopIds.size >= 6 ? '⚡ UNLOCKED [Z]' : `LOCKED (${visitedStopIds.size}/6)`}
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#f43f5e]">
+                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Corporate Asuras</div>
+                  <div className="font-hud text-base font-extrabold text-[#fda4af]">
+                    {6 - aliveDemons}/6 + {telemetry.bossDefeated ? 'Boss Slain' : 'Boss Alive'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* COLUMN 1: WHAT YOU SAW, UNLOCKED & VANQUISHED */}
+                <div className="p-3.5 bg-[#0a101d] border border-[#2dd4bf]/35 space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#2dd4bf]/25 pb-1.5">
+                    <span className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#2dd4bf]">
+                      ✓ SEEN &amp; UNLOCKED ({visitedStopIds.size + collectedRelicIds.size} DISCOVERIES)
+                    </span>
+                  </div>
+
+                  {/* Seen Projects & Unlocked Astra Powers */}
+                  <div className="space-y-1.5">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#d4af37]">
+                      Awakened Project Sanctums &amp; Powers ({visitedStopIds.size}/6)
+                    </div>
+                    {visitedStopIds.size === 0 ? (
+                      <div className="text-[11px] text-[#94a3b8] italic">
+                        No Project Sanctums inspected yet.
+                      </div>
+                    ) : (
+                      PORTFOLIO_STOPS.filter((s) => visitedStopIds.has(s.id)).map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center justify-between gap-2 p-2 bg-[#07161b] border-l-2 border-[#2dd4bf]"
+                        >
+                          <div>
+                            <div className="font-semibold text-[#f8f5ee]">
+                              {s.indexNumber}. {s.title}
+                            </div>
+                            <div className="font-mono text-[9px] text-[#2dd4bf]">
+                              Unlocked: {s.unlockedPower.name} (+{s.unlockedPower.bonusDamage} ATK)
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSummaryScrollOpen(false);
+                              onResumeFromMastery();
+                              onTeleportToStop(s.id);
+                            }}
+                            className="px-2 py-1 bg-[#0d9488]/30 hover:bg-[#0d9488] text-[#ccfbf1] hover:text-[#05070b] font-hud text-[9px] font-bold uppercase tracking-wider cursor-pointer"
+                          >
+                            Revisit →
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Collected Career Experience Jewels */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#e879f9]">
+                      Collected Career Jewels ({collectedRelicIds.size}/5)
+                    </div>
+                    {collectedRelicIds.size === 0 ? (
+                      <div className="text-[11px] text-[#94a3b8] italic">
+                        No Career Experience Jewels collected yet.
+                      </div>
+                    ) : (
+                      LOTUS_RELICS.filter((r) => collectedRelicIds.has(r.id)).map((r) => (
+                        <div
+                          key={r.id}
+                          className="p-2 bg-[#160b24] border-l-2 border-[#c084fc] space-y-0.5"
+                        >
+                          <div className="font-semibold text-[#f8f5ee]">
+                            ❖ {r.company} ({r.era})
+                          </div>
+                          <div className="text-[10px] text-[#e9d5ff]">{r.meaning}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Vanquished Corporate Asuras */}
+                  <div className="space-y-1 pt-1">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#fda4af]">
+                      Corporate Asuras Vanquished ({(telemetry.vanquishedDemonIds?.length ?? 0) + (telemetry.bossDefeated ? 1 : 0)}/7)
+                    </div>
+                    {telemetry.bossDefeated && (
+                      <div className="p-1.5 bg-[#290915] border-l-2 border-[#f43f5e] text-[10px] font-bold text-[#fecdd3]">
+                        ★ THE SEPTEMBER LAYOFF — "YOUR ROLE HAS BEEN IMPACTED" (SLAIN)
+                      </div>
+                    )}
+                    {INITIAL_DEMON_SPAWNS.filter((d) =>
+                      telemetry.vanquishedDemonIds?.includes(d.id)
+                    ).map((d) => (
+                      <div
+                        key={d.id}
+                        className="p-1.5 bg-[#1b0912] border-l-2 border-[#f43f5e]/70 text-[10px] text-[#fda4af]"
+                      >
+                        ✓ {d.name} ({d.title})
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* COLUMN 2: WHAT YOU COULD NOT SEE YET & IS STILL LEFT UNSEEN TO EXPLORE */}
+                <div className="p-3.5 bg-[#0f0c06] border border-[#d4af37]/50 space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#d4af37]/30 pb-1.5">
+                    <span className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#fef08a]">
+                      ✦ STILL LEFT UNSEEN IN THE WORLD ({6 - visitedStopIds.size + (5 - collectedRelicIds.size)} REMAINING)
+                    </span>
+                  </div>
+
+                  {/* Unseen Project Sanctums */}
+                  <div className="space-y-1.5">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#d4af37]">
+                      Unseen Project Sanctums ({6 - visitedStopIds.size} Left)
+                    </div>
+                    {visitedStopIds.size === PORTFOLIO_STOPS.length ? (
+                      <div className="p-2 bg-[#07161b] border border-[#2dd4bf]/40 text-[#2dd4bf] font-semibold text-[11px]">
+                        ★ All 6 Project Sanctums have been discovered and awakened!
+                      </div>
+                    ) : (
+                      PORTFOLIO_STOPS.filter((s) => !visitedStopIds.has(s.id)).map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center justify-between gap-2 p-2 bg-[#171207] border-l-2 border-[#d4af37]"
+                        >
+                          <div>
+                            <div className="font-semibold text-[#fef08a]">
+                              {s.indexNumber}. {s.title}
+                            </div>
+                            <div className="text-[10px] text-[#cbd5e1]">{s.category}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSummaryScrollOpen(false);
+                              onResumeFromMastery();
+                              onTeleportToStop(s.id);
+                            }}
+                            className="px-2.5 py-1 clip-blade-right bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-[9px] font-extrabold uppercase tracking-wider cursor-pointer shrink-0"
+                          >
+                            Teleport &amp; See →
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Unseen Career Experience Lotus Jewels */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#e879f9]">
+                      Uncollected Career Jewels ({5 - collectedRelicIds.size} Left)
+                    </div>
+                    {collectedRelicIds.size === LOTUS_RELICS.length ? (
+                      <div className="p-2 bg-[#160b24] border border-[#c084fc]/40 text-[#e879f9] font-semibold text-[11px]">
+                        ★ All 5 Career Experience Lotus Jewels collected!
+                      </div>
+                    ) : (
+                      LOTUS_RELICS.filter((r) => !collectedRelicIds.has(r.id)).map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-center justify-between gap-2 p-2 bg-[#160d21] border-l-2 border-[#c084fc]"
+                        >
+                          <div>
+                            <div className="font-semibold text-[#f3e8ff]">
+                              ❖ {r.company} ({r.era})
+                            </div>
+                            <div className="text-[10px] text-[#cbd5e1]">{r.name}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSummaryScrollOpen(false);
+                              onResumeFromMastery();
+                              onSelectGuidanceTarget?.(r.id, 'jewel');
+                              onTeleportToPoint?.(
+                                r.position.x,
+                                r.position.z + 1.8,
+                                `JEWEL · ${r.company}`
+                              );
+                            }}
+                            className="px-2.5 py-1 clip-blade-right bg-[#c084fc] hover:bg-[#e879f9] text-[#05070b] font-hud text-[9px] font-extrabold uppercase tracking-wider cursor-pointer shrink-0"
+                          >
+                            Teleport &amp; Collect →
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Unvanquished Corporate Asuras & Boss */}
+                  <div className="space-y-1 pt-1">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#fda4af]">
+                      Remaining Corporate Threats in the World ({aliveDemons + (telemetry.bossDefeated ? 0 : 1)} Left)
+                    </div>
+                    {!telemetry.bossDefeated && (
+                      <div className="flex items-center justify-between gap-2 p-2 bg-[#240813] border-l-2 border-[#f43f5e]">
+                        <span className="text-[10px] font-bold text-[#fecdd3]">
+                          ⚔ THE SEPTEMBER LAYOFF — "YOUR ROLE HAS BEEN IMPACTED"
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSummaryScrollOpen(false);
+                            onResumeFromMastery();
+                            onSummonLayoffBoss();
+                          }}
+                          className="px-2 py-0.5 bg-[#e11d48] hover:bg-[#f43f5e] text-white font-hud text-[9px] font-bold uppercase cursor-pointer shrink-0"
+                        >
+                          Confront Boss →
+                        </button>
+                      </div>
+                    )}
+                    {INITIAL_DEMON_SPAWNS.filter(
+                      (d) => !telemetry.vanquishedDemonIds?.includes(d.id)
+                    ).map((d) => (
+                      <div
+                        key={d.id}
+                        className="flex items-center justify-between gap-2 p-1.5 bg-[#170910] border-l border-[#f43f5e]/50 text-[10px] text-[#fda4af]"
+                      >
+                        <span className="truncate">• {d.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSummaryScrollOpen(false);
+                            onResumeFromMastery();
+                            onTeleportToPoint?.(d.position.x, d.position.z + 3.5, d.name);
+                          }}
+                          className="px-2 py-0.5 bg-[#881337] hover:bg-[#be123c] text-white font-hud text-[8px] uppercase cursor-pointer shrink-0"
+                        >
+                          Hunt →
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Scroll Footer Actions */}
+            <div className="px-5 py-3.5 bg-[#050811] border-t border-[#d4af37]/30 flex flex-wrap items-center justify-between gap-3 shrink-0 font-hud text-xs uppercase tracking-wider">
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={CREATOR_PROFILE.calUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 clip-blade-right bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-extrabold cursor-pointer"
+                >
+                  Book Call with Ayush
+                </a>
+                <a
+                  href={CREATOR_PROFILE.resumeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 border border-[#d4af37] bg-[#0c1322] hover:bg-[#172338] text-[#f8f5ee] font-bold cursor-pointer"
+                >
+                  Resume (PDF)
+                </a>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSummaryScrollOpen(false);
+                    onRestartFromBeginning();
+                  }}
+                  className="px-3.5 py-2 border border-[#f43f5e]/50 bg-[#1f0812] hover:bg-[#380e20] text-[#fda4af] font-bold cursor-pointer"
+                >
+                  ↻ Restart Verse
+                </button>
+                <button
+                  type="button"
+                  data-testid="continue-exploring-btn"
+                  onClick={() => {
+                    setSummaryScrollOpen(false);
+                    onResumeFromMastery();
+                  }}
+                  className="px-5 py-2 clip-blade-right bg-[#0d9488] hover:bg-[#14b8a6] text-[#f8f5ee] font-extrabold cursor-pointer"
+                >
+                  Continue Exploring World →
+                </button>
+              </div>
             </div>
           </div>
         </div>

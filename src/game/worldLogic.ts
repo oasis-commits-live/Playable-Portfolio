@@ -69,18 +69,18 @@ export const BOULDER_OUTCROPS: ReadonlyArray<{ x: number; z: number; scale: numb
 export function groundHeightAt(x: number, z: number): number {
   const distFromCenter = Math.hypot(x, z);
 
-  // Dramatic outer mountain range beyond 64m
+  // Sculpted walkable 3D mountain peaks and passes rising beyond 56m (player can climb right up the slopes!)
   let hillHeight = 0;
-  if (distFromCenter > 64) {
-    const t = Math.min(1, (distFromCenter - 64) / 48);
+  if (distFromCenter > 56) {
+    const t = Math.min(1, (distFromCenter - 56) / 68);
     const smooth = t * t * (3 - 2 * t);
+    const angle = Math.atan2(z, x);
+    // 8 distinct grand mountain peaks around the valley perimeter with climbable passes between them
+    const peakCrown = 0.5 + 0.5 * Math.cos(angle * 8 + Math.sin(angle * 3) * 0.6);
     const ridgeWave =
-      0.65 * Math.sin(x * 0.09) * Math.cos(z * 0.09) +
-      0.45 * Math.cos((x + z) * 0.06);
-    hillHeight = smooth * (11.5 + ridgeWave * 3.8);
-  } else if (distFromCenter > 56) {
-    const ft = (distFromCenter - 56) / 8;
-    hillHeight = ft * ft * 2.4;
+      0.55 * Math.sin(x * 0.075) * Math.cos(z * 0.075) +
+      0.45 * Math.cos((x - z) * 0.055);
+    hillHeight = smooth * (14.5 + peakCrown * 11.5 + ridgeWave * 4.2);
   }
 
   // Elevated hill mound under the Northern Sovereign Mandapa (x ~ 0, z ~ -26)
@@ -556,13 +556,13 @@ export function stepDemonCombatAI(
       state = 'strike';
       stateTimer = 0.24;
       // Lunge burst forward toward player during strike
-      if (dist > 0.9) {
-        const lungeDist = Math.min(dist - 0.85, 1.85);
+      if (dist > 0.85) {
+        const lungeDist = Math.min(dist - 0.8, 2.25);
         x += (dx / dist) * lungeDist;
         z += (dz / dist) * lungeDist;
       }
       const postLungeDist = Math.hypot(playerPos.x - x, playerPos.z - z);
-      if (postLungeDist <= 3.85) {
+      if (postLungeDist <= 4.15) {
         didStrikePlayer = true;
       }
     }
@@ -573,8 +573,8 @@ export function stepDemonCombatAI(
     yaw = Math.atan2(dx, dz);
     if (stateTimer <= 0) {
       state = 'recover';
-      stateTimer = demon.archetype === 'stalker' ? 0.48 : 0.65;
-      attackCooldown = demon.archetype === 'berserker' ? 1.05 : 1.35;
+      stateTimer = demon.archetype === 'stalker' ? 0.55 : 0.68;
+      attackCooldown = demon.archetype === 'berserker' ? 1.65 : 1.95;
     }
     return { x, z, yaw, state, stateTimer, attackCooldown, didTriggerWindup, didStrikePlayer };
   }
@@ -590,10 +590,10 @@ export function stepDemonCombatAI(
   if (dist <= demon.aggroRange) {
     state = 'chase';
     yaw = Math.atan2(dx, dz);
-    const strikeTriggerDist = demon.archetype === 'vanguard' ? 3.5 : 3.2;
+    const strikeTriggerDist = demon.archetype === 'vanguard' ? 3.7 : 3.4;
 
     if (dist > strikeTriggerDist) {
-      const chaseSpeed = demon.moveSpeed;
+      const chaseSpeed = demon.moveSpeed * 1.05;
       // Stalker weaves slightly while closing in; Berserker charges straight; Vanguard marches steadily
       const weaveAngle =
         demon.archetype === 'stalker' ? Math.sin(elapsed * 4.2 + demon.homeX) * 0.28 : 0;
@@ -602,7 +602,7 @@ export function stepDemonCombatAI(
       z += Math.cos(moveAngle) * chaseSpeed * dt;
     } else if (attackCooldown <= 0) {
       state = 'windup';
-      stateTimer = demon.archetype === 'stalker' ? 0.36 : 0.45;
+      stateTimer = demon.archetype === 'stalker' ? 0.42 : 0.48;
       didTriggerWindup = true;
     }
   } else {
@@ -917,18 +917,17 @@ export function computePlayerCombatStats(
 }
 
 /**
- * Determines whether the Colossal Layoff Boss should awaken:
- * Returns true once all Project Stops are seen AND all Experience Relics are viewed, OR if manually summoned.
+ * Determines whether the Colossal Layoff Boss can be challenged / awakened:
+ * The Layoff Boss CANNOT be challenged without seeing all 6 Project Sanctums first!
+ * Once all 6 projects have been visited (`visitedStopsCount >= totalStops`), the boss unlocks.
  */
 export function shouldAwakenLayoffBoss(
   visitedStopsCount: number,
-  collectedRelicsCount: number,
-  manuallySummoned = false,
-  totalStops = PORTFOLIO_STOPS.length,
-  totalRelics = LOTUS_RELICS.length
+  _collectedRelicsCount = 0,
+  _manuallySummoned = false,
+  totalStops = PORTFOLIO_STOPS.length
 ): boolean {
-  if (manuallySummoned) return true;
-  return visitedStopsCount >= totalStops && collectedRelicsCount >= totalRelics;
+  return visitedStopsCount >= totalStops;
 }
 
 /**
@@ -987,5 +986,51 @@ export function getRegionNameAt(x: number, z: number): string {
   if (x < -14) {
     return 'Paschima Vana · Twin-Blade Forge & Gopuram Terraces';
   }
+  if (Math.hypot(x, z) > 58) {
+    return 'Himavat Shikhara · Walkable Mountain Peaks';
+  }
   return 'Madhya Mandala · Open Valley of Portfolio Verse';
 }
+
+/**
+ * Determines whether the Indra Vajra Sky-Lightning Bolt super power is unlocked:
+ * Requires all 6 Project Sanctums (`visitedStopsCount >= totalStops`) to be inspected.
+ */
+export function canCastLightningBolt(
+  visitedStopsCount: number,
+  totalStops = PORTFOLIO_STOPS.length
+): boolean {
+  return visitedStopsCount >= totalStops;
+}
+
+/**
+ * Computes the Layoff Monster's melee damage multiplier:
+ * - Before all 6 projects are unlocked, the Layoff Monster has 75% Corporate Shield resistance (0.25x damage), making it nearly impossible to brute-force early.
+ * - Even after all 6 projects are unlocked, melee deals 0.65x damage so the player uses the Sky-Lightning Bolt to chunk or finish it!
+ */
+export function computeBossMeleeMultiplier(
+  visitedStopsCount: number,
+  totalStops = PORTFOLIO_STOPS.length
+): number {
+  return visitedStopsCount >= totalStops ? 0.65 : 0.25;
+}
+
+/**
+ * Computes the Sky-Lightning Bolt damage against the Layoff Monster or a Corporate Asura.
+ */
+export function computeLightningBoltDamage(isBoss: boolean): {
+  hpDamage: number;
+  postureDamage: number;
+} {
+  if (isBoss) {
+    return {
+      hpDamage: 560,
+      postureDamage: 100,
+    };
+  }
+  return {
+    hpDamage: 999,
+    postureDamage: 100,
+  };
+}
+

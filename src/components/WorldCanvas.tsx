@@ -6,6 +6,7 @@ import {
   LOTUS_RELICS,
   STORY_CHAPTERS,
   FORGE_WEAPONS,
+  LAYOFF_BOSS_CONFIG,
   LotusRelic,
   WeaponId,
 } from '../data/portfolioStops';
@@ -27,12 +28,16 @@ import {
   computePlayerCombatStats,
   stepDemonCombatAI,
   shouldAwakenLayoffBoss,
+  canCastLightningBolt,
+  computeBossMeleeMultiplier,
+  computeLightningBoltDamage,
   getWorldColliders,
   getRegionNameAt,
   PLAYER_RADIUS,
   PARAGLIDE_SPEED_MULTIPLIER,
 } from '../game/worldLogic';
 import { buildAncientWorldScene, TimeOfDay } from '../game/proceduralScene';
+import { WeatherPresetId } from '../game/weatherSystem';
 import { sound } from '../game/sound';
 import {
   HudTelemetry,
@@ -47,18 +52,21 @@ export interface WorldControllerRef {
   equipWeapon: (weaponId: WeaponId) => void;
   setGuidanceTarget: (id: string, kind: 'project' | 'jewel' | 'weapon') => void;
   resetToSpawn: () => void;
+  restartFromBeginning: () => void;
   setVirtualInput: (forward: number, right: number) => void;
   triggerVirtualJump: () => void;
   triggerAttack: (isNova?: boolean) => void;
+  triggerLightningBolt: () => void;
   triggerParryDeflect: () => void;
   triggerDodgeDash: () => void;
   triggerGrappleHook: () => void;
   summonLayoffBoss: () => void;
   setTimeOfDay: (mode: TimeOfDay) => void;
+  setWeatherPreset: (preset: WeatherPresetId) => void;
 }
 
 interface WorldCanvasProps {
-  gameState: 'title' | 'playing' | 'paused' | 'gameover';
+  gameState: 'title' | 'playing' | 'paused' | 'gameover' | 'player_died';
   activeStopId: string | null;
   visitedStopIds: Set<string>;
   collectedRelicIds: Set<string>;
@@ -67,6 +75,7 @@ interface WorldCanvasProps {
   onCloseStop: () => void;
   onCollectRelic: (relic: LotusRelic) => void;
   onBossDefeated: () => void;
+  onPlayerDied: () => void;
   onTogglePause: () => void;
   onStartFromTitle: () => void;
   onGamepadStatusChange: (connected: boolean) => void;
@@ -103,6 +112,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onCloseStop,
   onCollectRelic,
   onBossDefeated,
+  onPlayerDied,
   onTogglePause,
   onStartFromTitle,
   onGamepadStatusChange,
@@ -120,6 +130,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onCloseStop,
     onCollectRelic,
     onBossDefeated,
+    onPlayerDied,
     onTogglePause,
     onStartFromTitle,
     onGamepadStatusChange,
@@ -136,10 +147,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       onCloseStop,
       onCollectRelic,
       onBossDefeated,
+      onPlayerDied,
       onTogglePause,
       onStartFromTitle,
       onGamepadStatusChange,
     };
+    if (gameState !== 'playing' || activeStopId) {
+      if (typeof document !== 'undefined' && document.pointerLockElement) {
+        try {
+          document.exitPointerLock?.();
+        } catch {
+          // ignore pointer lock release errors
+        }
+      }
+    }
   }, [
     gameState,
     activeStopId,
@@ -150,6 +171,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onCloseStop,
     onCollectRelic,
     onBossDefeated,
+    onPlayerDied,
     onTogglePause,
     onStartFromTitle,
     onGamepadStatusChange,
@@ -256,6 +278,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       combatCallout: null as string | null,
       combatCalloutTimer: 0,
       manualBossSummon: false,
+      lightningCooldown: 0,
     };
 
     const camState = {
@@ -461,6 +484,31 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.attackTimer = duration;
       playerState.attackCooldown = (isNova ? 0.36 : stage === 3 ? 0.32 : 0.2) * speedFactor;
 
+      // Soft Target Lock-On Magnetism: automatically face & lunge toward the nearest enemy within 7.5m before swinging
+      let lockTargetDx = 0;
+      let lockTargetDz = 0;
+      let lockTargetDist = 7.5;
+      for (const demon of world.demons) {
+        if (!demon.alive) continue;
+        const d = Math.hypot(demon.x - playerState.x, demon.z - playerState.z);
+        if (d < lockTargetDist) {
+          lockTargetDist = d;
+          lockTargetDx = demon.x - playerState.x;
+          lockTargetDz = demon.z - playerState.z;
+        }
+      }
+      if (world.layoffBoss.awakened && !world.layoffBoss.defeated) {
+        const bd = Math.hypot(world.layoffBoss.x - playerState.x, world.layoffBoss.z - playerState.z);
+        if (bd < lockTargetDist + 2.0) {
+          lockTargetDist = bd;
+          lockTargetDx = world.layoffBoss.x - playerState.x;
+          lockTargetDz = world.layoffBoss.z - playerState.z;
+        }
+      }
+      if (lockTargetDist < 7.5 && (Math.abs(lockTargetDx) > 0.01 || Math.abs(lockTargetDz) > 0.01)) {
+        playerState.yaw = Math.atan2(lockTargetDx, lockTargetDz);
+      }
+
       // Forward Lunge impulse scaled by combo stage
       playerState.dashTimer = stage === 3 ? 0.15 : 0.11;
       playerState.dashDirX = Math.sin(playerState.yaw);
@@ -573,8 +621,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           playerState.outOfCombatTimer = 6.5;
           playerState.comboHitCount += 1;
           playerState.comboStreakDecayTimer = 4.5;
+          const bossMeleeMult = computeBossMeleeMultiplier(stateRef.current.visitedStopIds.size);
           const isBossDeathblow = boss.posture >= boss.maxPosture;
-          const dealtBossDmg = isBossDeathblow ? Math.round(baseDmg * 2.4) : baseDmg;
+          const dealtBossDmg = Math.max(
+            4,
+            Math.round(baseDmg * bossMeleeMult * (isBossDeathblow ? 2.2 : 1.0))
+          );
           if (isBossDeathblow) {
             boss.posture = 0;
             sound.playDeathblow();
@@ -592,18 +644,28 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           } else {
             playerState.hitStopTimer = stage === 3 ? 0.045 : 0.025;
             camState.shakeIntensity = stage === 3 ? 0.18 : 0.1;
+            const shieldNote =
+              stateRef.current.visitedStopIds.size < 6
+                ? 'SHIELDED (UNLOCK ALL 6 PROJECTS FOR ⚡ LIGHTNING!)'
+                : 'USE [Z] ⚡ INDRA LIGHTNING BOLT!';
             spawnFloatingPopup(
               boss.x,
               boss.y + 4.0,
               boss.z,
               `-${dealtBossDmg} HP`,
               stage === 3 ? 'crit' : 'damage',
-              comboNames[stage]
+              shieldNote
             );
+            if (stateRef.current.visitedStopIds.size < 6) {
+              showCombatCallout(
+                `⚔ CORPORATE ARMOR RESIST (-${dealtBossDmg} HP) · AWAKEN ALL 6 PROJECTS (${stateRef.current.visitedStopIds.size}/6) TO UNLOCK ⚡ SKY-LIGHTNING!`,
+                1.8
+              );
+            }
           }
 
           boss.hp = Math.max(0, boss.hp - dealtBossDmg);
-          boss.posture = Math.min(boss.maxPosture, boss.posture + basePostureDmg);
+          boss.posture = Math.min(boss.maxPosture, boss.posture + Math.round(basePostureDmg * 0.7));
           boss.hitFlashTimer = 0.24;
           world.particlePool.spawnBurst(boss.x, boss.y + 2.4, boss.z, 30, true);
 
@@ -613,6 +675,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             sound.playDeathblow();
             sound.playRelicChime(true);
             world.particlePool.spawnBurst(boss.x, boss.y + 2.8, boss.z, 58, true);
+            if (typeof document !== 'undefined' && document.pointerLockElement) {
+              try {
+                document.exitPointerLock?.();
+              } catch {
+                // ignore
+              }
+            }
             stateRef.current.onBossDefeated();
           } else if (!isBossDeathblow) {
             sound.playDemonHit(false);
@@ -625,18 +694,139 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       }
     };
 
-    const awakenAndFocusLayoffBoss = () => {
-      playerState.manualBossSummon = true;
-      const boss = world.layoffBoss;
-      if (!boss.awakened && !boss.defeated) {
-        boss.awakened = true;
-        boss.group.visible = true;
-        sound.playBossAwaken();
+    // Super Power: Indra Vajra Sky-Lightning Bolt (Unlocked after all 6 Projects have been seen!) [Key Z]
+    const performLightningBolt = () => {
+      const unlockedCount = stateRef.current.visitedStopIds.size;
+      if (!canCastLightningBolt(unlockedCount)) {
+        sound.playPerilousWarning();
+        showCombatCallout(
+          `⚡ INDRA VAJRA LIGHTNING LOCKED — INSPECT ALL 6 PROJECT SANCTUMS (${unlockedCount}/6 UNLOCKED)!`,
+          2.4
+        );
+        return;
       }
-      boss.x = 0;
-      boss.z = -48;
-      boss.y = walkableSurfaceHeightAt(0, -48, 0);
-      boss.group.position.set(boss.x, boss.y, boss.z);
+      if (playerState.lightningCooldown > 0) {
+        showCombatCallout(
+          `⚡ INDRA VAJRA RECHARGING (${playerState.lightningCooldown.toFixed(1)}s)...`,
+          1.1
+        );
+        return;
+      }
+
+      playerState.lightningCooldown = 0.55;
+      playerState.attackDuration = 0.42;
+      playerState.attackTimer = 0.42;
+      playerState.comboStage = 3;
+
+      const boss = world.layoffBoss;
+      // Prioritize the Layoff Monster if awakened or nearby; otherwise strike nearest Corporate Asura
+      let targetDemon: (typeof world.demons)[number] | null = null;
+      let nearestDemonDist = 28;
+      for (const demon of world.demons) {
+        if (!demon.alive) continue;
+        const d = Math.hypot(demon.x - playerState.x, demon.z - playerState.z);
+        if (d < nearestDemonDist) {
+          nearestDemonDist = d;
+          targetDemon = demon;
+        }
+      }
+
+      const bossDist = Math.hypot(boss.x - playerState.x, boss.z - playerState.z);
+      const shouldStrikeBoss =
+        !boss.defeated && (boss.awakened || bossDist < 36 || !targetDemon);
+
+      if (shouldStrikeBoss && !boss.defeated) {
+        if (!boss.awakened) {
+          boss.awakened = true;
+          boss.group.visible = true;
+        }
+        playerState.yaw = Math.atan2(boss.x - playerState.x, boss.z - playerState.z);
+        world.triggerLightningBoltVisual(boss.x, boss.y, boss.z);
+        sound.playLightningThunderbolt();
+        playerState.hitStopTimer = 0.085;
+        camState.shakeIntensity = 0.48;
+
+        const bolt = computeLightningBoltDamage(true);
+        boss.hp = Math.max(0, boss.hp - bolt.hpDamage);
+        boss.posture = Math.min(boss.maxPosture, boss.posture + bolt.postureDamage);
+        boss.hitFlashTimer = 0.45;
+        world.particlePool.spawnBurst(boss.x, boss.y + 2.8, boss.z, 55, true);
+
+        spawnFloatingPopup(
+          boss.x,
+          boss.y + 4.8,
+          boss.z,
+          `⚡ -${bolt.hpDamage} HP`,
+          'deathblow',
+          'INDRA VAJRA SKY-LIGHTNING!'
+        );
+
+        if (boss.hp <= 0) {
+          boss.defeated = true;
+          boss.group.visible = false;
+          sound.playDeathblow();
+          sound.playRelicChime(true);
+          world.particlePool.spawnBurst(boss.x, boss.y + 3.0, boss.z, 70, true);
+          showCombatCallout(
+            '⚡ INDRA VAJRA THUNDERBOLT OBLITERATED THE SEPTEMBER LAYOFF!',
+            3.2
+          );
+          if (typeof document !== 'undefined' && document.pointerLockElement) {
+            try {
+              document.exitPointerLock?.();
+            } catch {
+              // ignore
+            }
+          }
+          stateRef.current.onBossDefeated();
+        } else {
+          showCombatCallout(
+            `⚡ INDRA VAJRA THUNDERBOLT STRUCK LAYOFF MONSTER (-${bolt.hpDamage} HP · ${boss.hp}/${boss.maxHp} LEFT)!`,
+            2.4
+          );
+        }
+      } else if (targetDemon) {
+        playerState.yaw = Math.atan2(targetDemon.x - playerState.x, targetDemon.z - playerState.z);
+        world.triggerLightningBoltVisual(targetDemon.x, targetDemon.y, targetDemon.z);
+        sound.playLightningThunderbolt();
+        playerState.hitStopTimer = 0.075;
+        camState.shakeIntensity = 0.38;
+
+        const dealt = targetDemon.hp;
+        targetDemon.hp = 0;
+        targetDemon.alive = false;
+        targetDemon.group.visible = false;
+        sound.playDeathblow();
+        world.particlePool.spawnBurst(targetDemon.x, targetDemon.y + 1.5, targetDemon.z, 48, true);
+        spawnFloatingPopup(
+          targetDemon.x,
+          targetDemon.y + 2.8,
+          targetDemon.z,
+          `⚡ -${dealt} HP`,
+          'deathblow',
+          `${targetDemon.name.toUpperCase()} VAPORIZED`
+        );
+        showCombatCallout(
+          `⚡ INDRA VAJRA SKY-LIGHTNING VAPORIZED "${targetDemon.name.toUpperCase()}"!`,
+          2.4
+        );
+      } else {
+        const strikeX = playerState.x + Math.sin(playerState.yaw) * 5.0;
+        const strikeZ = playerState.z + Math.cos(playerState.yaw) * 5.0;
+        const strikeY = walkableSurfaceHeightAt(strikeX, strikeZ, playerState.y);
+        world.triggerLightningBoltVisual(strikeX, strikeY, strikeZ);
+        sound.playLightningThunderbolt();
+        camState.shakeIntensity = 0.32;
+        showCombatCallout('⚡ INDRA VAJRA SKY-LIGHTNING UNLEASHED!', 1.8);
+      }
+    };
+
+    const awakenAndFocusLayoffBoss = () => {
+      if (stateRef.current.activeStopId) {
+        stateRef.current.onCloseStop();
+      }
+      const visitedCount = stateRef.current.visitedStopIds.size;
+      const unlockedAllProjects = visitedCount >= PORTFOLIO_STOPS.length;
 
       playerState.x = 0;
       playerState.z = -39.5;
@@ -648,12 +838,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       playerState.grappleActive = false;
       camState.yaw = 0;
       camState.pitch = 0.15;
-      camState.currentPos.set(0.36, playerState.y + 2.1, -35.5);
-      camState.currentLook.set(0, playerState.y + 1.8, -46);
+      camState.currentPos.set(0.36, playerState.y + 2.1, -35.2);
+      camState.currentLook.set(0, playerState.y + 2.4, -45.8);
       world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
       world.playerRig.group.rotation.y = playerState.yaw;
       world.particlePool.spawnBurst(0, playerState.y + 0.5, -39.5, 24, true);
-      showCombatCallout('ACT V · MAHA-ASURA: THE SEPTEMBER LAYOFF AWAKENS!', 2.8);
+
+      if (!unlockedAllProjects) {
+        sound.playPerilousWarning();
+        showCombatCallout(
+          `🔒 UNLOCK FIGHT AFTER SEEING ALL THE PROJECTS (${visitedCount}/6 PROJECTS SEEN)`,
+          3.4
+        );
+        return;
+      }
+
+      playerState.manualBossSummon = true;
+      const boss = world.layoffBoss;
+      if (!boss.awakened && !boss.defeated) {
+        boss.awakened = true;
+        boss.group.visible = true;
+        sound.playBossAwaken();
+      }
+      boss.x = 0;
+      boss.z = -48;
+      boss.y = walkableSurfaceHeightAt(0, -48, 0);
+      boss.group.position.set(boss.x, boss.y, boss.z);
+      showCombatCallout(
+        'ACT V · MAHA-ASURA AWAKENS! PRESS [Z] TO STRIKE DOWN ⚡ SKY-LIGHTNING BOLT!',
+        3.2
+      );
     };
 
     controllerRef.current = {
@@ -723,6 +937,67 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         world.particlePool.spawnBurst(0, playerState.y + 0.4, 8.2, 14, true);
         sound.playTempleBell(528);
       },
+      restartFromBeginning() {
+        playerState.x = 0;
+        playerState.z = 8.2;
+        playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
+        playerState.vx = 0;
+        playerState.vz = 0;
+        playerState.vy = 0;
+        playerState.grounded = true;
+        playerState.isGliding = false;
+        playerState.grappleActive = false;
+        playerState.yaw = Math.PI;
+        playerState.hp = playerState.maxHp;
+        playerState.stamina = 100;
+        playerState.outOfCombatTimer = 0;
+        playerState.hurtFlashTimer = 0;
+        playerState.equippedWeaponId = 'weapon-nandaka';
+        playerState.guidanceTargetId = 'mandapa-origin';
+        playerState.guidanceTargetKind = 'project';
+        playerState.comboHitCount = 0;
+        playerState.comboStage = 1;
+        playerState.lightningCooldown = 0;
+        playerState.manualBossSummon = false;
+        camState.yaw = 0;
+        camState.pitch = 0.15;
+        camState.distance = 4.15;
+        world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
+        world.playerRig.group.rotation.y = playerState.yaw;
+
+        // Revive all 6 Corporate Asuras at full HP and home coordinates
+        for (const demon of world.demons) {
+          demon.alive = true;
+          demon.hp = demon.maxHp;
+          demon.posture = 0;
+          demon.x = demon.homeX;
+          demon.z = demon.homeZ;
+          demon.y = walkableSurfaceHeightAt(demon.homeX, demon.homeZ, 0);
+          demon.state = 'patrol';
+          demon.stateTimer = 0;
+          demon.attackCooldown = 0.8;
+          demon.hitFlashTimer = 0;
+          demon.group.visible = true;
+          demon.group.position.set(demon.x, demon.y, demon.z);
+        }
+
+        // Reset Colossal September Layoff Boss to full 1600 HP
+        const boss = world.layoffBoss;
+        boss.awakened = false;
+        boss.defeated = false;
+        boss.hp = LAYOFF_BOSS_CONFIG.maxHp;
+        boss.maxHp = LAYOFF_BOSS_CONFIG.maxHp;
+        boss.posture = 0;
+        boss.x = LAYOFF_BOSS_CONFIG.spawnPosition.x;
+        boss.z = LAYOFF_BOSS_CONFIG.spawnPosition.z;
+        boss.y = walkableSurfaceHeightAt(boss.x, boss.z, 0);
+        boss.group.visible = false;
+        boss.group.position.set(boss.x, boss.y, boss.z);
+
+        world.particlePool.spawnBurst(0, playerState.y + 0.5, 8.2, 22, true);
+        sound.playTempleBell(432);
+        showCombatCallout('PORTFOLIO VERSE REBORN · BEGIN YOUR JOURNEY ANEW!', 2.2);
+      },
       setVirtualInput(forward: number, right: number) {
         virtualInput.forward = forward;
         virtualInput.right = right;
@@ -736,6 +1011,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       },
       triggerAttack(isNova = false) {
         performAttack(isNova);
+      },
+      triggerLightningBolt() {
+        performLightningBolt();
       },
       triggerParryDeflect() {
         performParryDeflect();
@@ -751,6 +1029,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       },
       setTimeOfDay(mode: TimeOfDay) {
         world.applyTimeOfDay(mode);
+      },
+      setWeatherPreset(preset: WeatherPresetId) {
+        world.setWeatherPreset(preset);
       },
     };
 
@@ -819,6 +1100,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         } else if (code === 'KeyQ') {
           e.preventDefault();
           performAttack(true);
+        } else if (code === 'KeyZ') {
+          e.preventDefault();
+          performLightningBolt();
         } else if (code === 'KeyV') {
           e.preventDefault();
           performParryDeflect();
@@ -858,20 +1142,135 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       keysHeld.delete(e.code);
     };
 
+    let touchLookPointerId: number | null = null;
+    let touchStartClientX = 0;
+    let touchStartClientY = 0;
+    let touchMovedDist = 0;
+
+    // Direct 3D Raycast Picking on Monuments, Scroll Pedestals, Weapon Forges & Lotus Relics
+    const _ndcPointer = new THREE.Vector2();
+    const tryInteractWith3DWorldAtClientPoint = (clientX: number, clientY: number): boolean => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      _ndcPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      _ndcPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      _raycaster.setFromCamera(_ndcPointer, camera);
+      _raycaster.near = 0.2;
+      _raycaster.far = 55;
+
+      // 1) Check Weapon Forges first (clicking a 3D Forge Altar equips or tracks that weapon)
+      for (const wf of FORGE_WEAPONS) {
+        const wfRig = world.weaponForgeRigs.get(wf.id);
+        if (!wfRig) continue;
+        const hits = _raycaster.intersectObject(wfRig.group, true);
+        if (hits.length > 0) {
+          const dist = Math.hypot(wf.position.x - playerState.x, wf.position.z - playerState.z);
+          if (dist <= 12.0) {
+            performEquipWeapon(wf.id);
+          } else {
+            playerState.guidanceTargetId = wf.id;
+            playerState.guidanceTargetKind = 'weapon';
+            sound.playTempleBell(587.33);
+            showCombatCallout(`TRACKING FORGE → ${wf.name.toUpperCase()}`, 1.4);
+          }
+          return true;
+        }
+      }
+
+      // 2) Check Scroll Pedestals & Monument Artifacts (clicking an in-range sanctum opens its Codex; clicking a distant one grapples/tracks)
+      for (const stop of PORTFOLIO_STOPS) {
+        const monRig = world.monumentRigs.get(stop.id);
+        if (!monRig) continue;
+        const scrollHits = _raycaster.intersectObject(monRig.scrollPedestalMesh, true);
+        const artifactHits =
+          scrollHits.length > 0 ? scrollHits : _raycaster.intersectObject(monRig.artifactMesh, true);
+        if (artifactHits.length > 0) {
+          const dist = Math.hypot(
+            stop.position.x - playerState.x,
+            stop.position.z - playerState.z
+          );
+          if (dist <= 10.5) {
+            stateRef.current.onInspectStop(stop.id);
+          } else {
+            playerState.guidanceTargetId = stop.id;
+            playerState.guidanceTargetKind = 'project';
+            sound.playTempleBell(528);
+            showCombatCallout(`TRACKING SANCTUM → ${stop.title.toUpperCase()}`, 1.4);
+          }
+          return true;
+        }
+      }
+
+      // 3) Check Uncollected Career Experience Lotus Relics
+      for (const relic of LOTUS_RELICS) {
+        if (stateRef.current.collectedRelicIds.has(relic.id)) continue;
+        const rRig = world.relicRigs.get(relic.id);
+        if (!rRig || !rRig.group.visible) continue;
+        const hits = _raycaster.intersectObject(rRig.group, true);
+        if (hits.length > 0) {
+          playerState.guidanceTargetId = relic.id;
+          playerState.guidanceTargetKind = 'jewel';
+          sound.playTempleBell(659.25);
+          showCombatCallout(`TRACKING JEWEL → ${relic.company.toUpperCase()}`, 1.4);
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    let mouseEdgePanDirX = 0;
+    let mouseEdgePanDirY = 0;
+
     const clearInputsOnBlur = () => {
       keysHeld.clear();
       virtualInput.forward = 0;
       virtualInput.right = 0;
       hasPointerPos = false;
+      touchLookPointerId = null;
+      mouseEdgePanDirX = 0;
+      mouseEdgePanDirY = 0;
     };
 
     const onPointerDown = (e: PointerEvent) => {
       if (stateRef.current.gameState !== 'playing' || stateRef.current.activeStopId) return;
+      if (e.pointerType === 'touch') {
+        if (touchLookPointerId === null) {
+          touchLookPointerId = e.pointerId;
+          lastPointerX = e.clientX;
+          lastPointerY = e.clientY;
+          touchStartClientX = e.clientX;
+          touchStartClientY = e.clientY;
+          touchMovedDist = 0;
+          hasPointerPos = true;
+        }
+        return;
+      }
       if (e.button === 2) {
+        if (document.pointerLockElement !== renderer.domElement) {
+          try {
+            renderer.domElement.requestPointerLock?.();
+          } catch {
+            // fallback to unlocked infinite edge-pan
+          }
+        }
         performParryDeflect();
         return;
       }
       if (e.button === 0) {
+        if (
+          document.pointerLockElement !== renderer.domElement &&
+          tryInteractWith3DWorldAtClientPoint(e.clientX, e.clientY)
+        ) {
+          return;
+        }
+        if (document.pointerLockElement !== renderer.domElement) {
+          try {
+            renderer.domElement.requestPointerLock?.();
+          } catch {
+            // fallback to unlocked infinite edge-pan
+          }
+        }
         performAttack(false);
       }
     };
@@ -879,29 +1278,101 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     const onPointerMove = (e: PointerEvent) => {
       if (stateRef.current.gameState !== 'playing' || stateRef.current.activeStopId) {
         hasPointerPos = false;
+        mouseEdgePanDirX = 0;
+        mouseEdgePanDirY = 0;
         return;
       }
-      if (!hasPointerPos) {
+      if (e.pointerType === 'touch') {
+        if (touchLookPointerId !== null && e.pointerId !== touchLookPointerId) return;
+        if (touchLookPointerId === null) {
+          touchLookPointerId = e.pointerId;
+          lastPointerX = e.clientX;
+          lastPointerY = e.clientY;
+          touchStartClientX = e.clientX;
+          touchStartClientY = e.clientY;
+          touchMovedDist = 0;
+          hasPointerPos = true;
+          return;
+        }
+        touchMovedDist = Math.hypot(
+          e.clientX - touchStartClientX,
+          e.clientY - touchStartClientY
+        );
+      }
+
+      const isLocked = document.pointerLockElement === renderer.domElement;
+      if (!hasPointerPos && !isLocked) {
         lastPointerX = e.clientX;
         lastPointerY = e.clientY;
         hasPointerPos = true;
         return;
       }
+
+      // Infinite 360° Mouse Panning: use movementX/movementY directly (whether pointer-locked or unlocked)
+      const rawMovementX =
+        typeof e.movementX === 'number' && e.pointerType !== 'touch'
+          ? THREE.MathUtils.clamp(e.movementX, -320, 320)
+          : 0;
+      const rawMovementY =
+        typeof e.movementY === 'number' && e.pointerType !== 'touch'
+          ? THREE.MathUtils.clamp(e.movementY, -320, 320)
+          : 0;
+
       const dx =
-        typeof e.movementX === 'number' && Math.abs(e.movementX) < 120
-          ? e.movementX
+        e.pointerType !== 'touch' && (isLocked || Math.abs(rawMovementX) > 0)
+          ? rawMovementX
           : e.clientX - lastPointerX;
       const dy =
-        typeof e.movementY === 'number' && Math.abs(e.movementY) < 120
-          ? e.movementY
+        e.pointerType !== 'touch' && (isLocked || Math.abs(rawMovementY) > 0)
+          ? rawMovementY
           : e.clientY - lastPointerY;
       lastPointerX = e.clientX;
       lastPointerY = e.clientY;
 
+      // Continuous Infinite Edge-Panning fallback when pointer is near viewport borders without Pointer Lock
+      if (!isLocked && e.pointerType !== 'touch') {
+        const vw = window.innerWidth || 1280;
+        const vh = window.innerHeight || 720;
+        const edgeZone = Math.min(72, vw * 0.07);
+        if (e.clientX <= edgeZone) {
+          mouseEdgePanDirX = -((edgeZone - e.clientX) / edgeZone);
+        } else if (e.clientX >= vw - edgeZone) {
+          mouseEdgePanDirX = (e.clientX - (vw - edgeZone)) / edgeZone;
+        } else {
+          mouseEdgePanDirX = 0;
+        }
+        const vEdgeZone = Math.min(54, vh * 0.07);
+        if (e.clientY <= vEdgeZone) {
+          mouseEdgePanDirY = -((vEdgeZone - e.clientY) / vEdgeZone);
+        } else if (e.clientY >= vh - vEdgeZone) {
+          mouseEdgePanDirY = (e.clientY - (vh - vEdgeZone)) / vEdgeZone;
+        } else {
+          mouseEdgePanDirY = 0;
+        }
+      } else {
+        mouseEdgePanDirX = 0;
+        mouseEdgePanDirY = 0;
+      }
+
+      const sensitivity = e.pointerType === 'touch' ? 0.0062 : 0.0046;
       if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
-        camState.yaw -= dx * 0.0042;
-        camState.pitch = THREE.MathUtils.clamp(camState.pitch + dy * 0.0034, 0.04, 0.88);
+        camState.yaw -= dx * sensitivity;
+        camState.pitch = THREE.MathUtils.clamp(
+          camState.pitch + dy * (sensitivity * 0.8),
+          0.04,
+          0.88
+        );
         camState.lastMousePanTime = performance.now();
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerId === touchLookPointerId) {
+        if (touchMovedDist < 12 && stateRef.current.gameState === 'playing' && !stateRef.current.activeStopId) {
+          tryInteractWith3DWorldAtClientPoint(e.clientX, e.clientY);
+        }
+        touchLookPointerId = null;
+        hasPointerPos = false;
       }
     };
 
@@ -932,6 +1403,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     domElem.addEventListener('pointerdown', onPointerDown);
     domElem.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     domElem.addEventListener('wheel', onWheel, { passive: true });
 
     let frameId = 0;
@@ -1098,7 +1571,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.equippedWeaponId
       );
 
-      // Check if Colossal September Layoff Boss should awaken
+      // Check if Colossal September Layoff Boss should awaken (ONLY after all 6 projects have been visited!)
       const boss = world.layoffBoss;
       if (
         !boss.awakened &&
@@ -1112,19 +1585,34 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         boss.awakened = true;
         boss.group.visible = true;
         sound.playBossAwaken();
+        showCombatCallout(
+          '⚡ ALL 6 PROJECTS SEEN — THE LAYOFF BOSS & [Z] SKY-LIGHTNING BOLT UNLOCKED!',
+          3.2
+        );
+      }
+
+      // Update 3D Boss Lock Hologram at the Northern Citadel (visible during gameplay whenever visitedStopsNow.size < 6)
+      world.updateBossLockHologram(
+        currentMode === 'title' ? 6 : visitedStopsNow.size,
+        boss.awakened,
+        boss.defeated,
+        elapsedTotal
+      );
+
+      for (const d of world.demons) {
+        d.hpBarGroup.visible = currentMode !== 'title' && d.alive;
       }
 
       if (currentMode === 'title') {
         sound.setMusicMood('silent');
-        const tourAngle = elapsedTotal * 0.14;
-        const tourRadius = 26;
+        const sway = elapsedTotal * 0.22;
         _desiredCamPos.set(
-          Math.sin(tourAngle) * tourRadius,
-          8.4 + Math.sin(elapsedTotal * 0.35) * 1.4,
-          Math.cos(tourAngle) * tourRadius - 4
+          Math.sin(sway) * 2.4,
+          4.8 + Math.sin(elapsedTotal * 0.35) * 0.25,
+          15.2 + Math.cos(sway) * 1.1
         );
-        _desiredLookAt.set(0, 3.2, -16);
-        camera.position.lerp(_desiredCamPos, 1 - Math.exp(-4 * frameDt));
+        _desiredLookAt.set(Math.sin(sway) * 0.6, 5.4, -22);
+        camera.position.lerp(_desiredCamPos, 1 - Math.exp(-5 * frameDt));
         camera.lookAt(_desiredLookAt);
 
         world.updateWorldAnimations(elapsedTotal, dt, null, null, 0, 0, false, false, 1, false);
@@ -1136,6 +1624,23 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.comboResetTimer = Math.max(0, playerState.comboResetTimer - frameDt);
         playerState.outOfCombatTimer = Math.max(0, playerState.outOfCombatTimer - frameDt);
         playerState.hurtFlashTimer = Math.max(0, playerState.hurtFlashTimer - frameDt * 1.8);
+        playerState.lightningCooldown = Math.max(0, playerState.lightningCooldown - frameDt);
+
+        // Apply continuous infinite edge-panning when cursor rests near screen edges
+        if (!activeStopIdNow && currentMode === 'playing') {
+          if (Math.abs(mouseEdgePanDirX) > 0.01) {
+            camState.yaw -= mouseEdgePanDirX * 2.15 * frameDt;
+            camState.lastMousePanTime = now;
+          }
+          if (Math.abs(mouseEdgePanDirY) > 0.01) {
+            camState.pitch = THREE.MathUtils.clamp(
+              camState.pitch + mouseEdgePanDirY * 1.15 * frameDt,
+              0.04,
+              0.88
+            );
+            camState.lastMousePanTime = now;
+          }
+        }
 
         if (playerState.comboStreakDecayTimer > 0) {
           playerState.comboStreakDecayTimer = Math.max(0, playerState.comboStreakDecayTimer - frameDt);
@@ -1165,10 +1670,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         }
 
         // Out-of-Combat Prana Regeneration ONLY (Never erase damage during active combat!)
-        if (playerState.outOfCombatTimer <= 0 && playerState.hp < playerState.maxHp) {
+        if (playerState.outOfCombatTimer <= 0 && playerState.hp < playerState.maxHp && playerState.hp > 0) {
           playerState.hp = Math.min(
             playerState.maxHp,
-            playerState.hp + (8.0 + combatStats.unlockedPowersCount * 2.5) * dt
+            playerState.hp + (5.0 + combatStats.unlockedPowersCount * 1.5) * dt
           );
         }
 
@@ -1557,9 +2062,17 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               );
 
               if (playerState.hp <= 0) {
-                playerState.hp = Math.round(playerState.maxHp * 0.65);
-                sound.playTempleBell(432);
-                showCombatCallout('PRANA DEPLETED · GARUDA SECOND WIND RESURGENCE!', 2.4);
+                playerState.hp = 0;
+                sound.playPlayerDeath();
+                showCombatCallout(`SLAIN BY ${demon.name.toUpperCase()} — PRANA EXTINGUISHED!`, 3.0);
+                if (typeof document !== 'undefined' && document.pointerLockElement) {
+                  try {
+                    document.exitPointerLock?.();
+                  } catch {
+                    // ignore
+                  }
+                }
+                stateRef.current.onPlayerDied();
               } else {
                 showCombatCallout(
                   `STRUCK BY ${demon.name.toUpperCase()} (-${dmg} HP) · PRESS [RMB] TO DEFLECT!`,
@@ -1644,15 +2157,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           const bDist = Math.hypot(bdx, bdz);
           bossDistToPlayer = bDist;
 
-          if (bDist < 32 && bDist > 3.2 && !activeStopIdNow) {
-            boss.x += (bdx / bDist) * 3.1 * dt;
-            boss.z += (bdz / bDist) * 3.1 * dt;
-          } else if (bDist <= 4.5 && boss.attackTimer > 1.55 && !activeStopIdNow) {
+          if (bDist < 36 && bDist > 3.1 && !activeStopIdNow) {
+            boss.x += (bdx / bDist) * 4.25 * dt;
+            boss.z += (bdz / bDist) * 4.25 * dt;
+          } else if (bDist <= 5.3 && boss.attackTimer > 1.85 && !activeStopIdNow) {
             boss.attackTimer = 0;
             playerState.outOfCombatTimer = 6.5;
             const bossDefense = resolveCombatDefense(
               26,
-              42,
+              52,
               playerState.parryTimer,
               playerState.dodgeIframeTimer
             );
@@ -1699,8 +2212,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             } else {
               const bDmg = bossDefense.hpDamageTaken;
               playerState.hp = Math.max(0, playerState.hp - bDmg);
-              playerState.hurtFlashTimer = 0.85;
-              camState.shakeIntensity = 0.26;
+              playerState.hurtFlashTimer = 0.92;
+              camState.shakeIntensity = 0.34;
               sound.playPlayerHurt();
               spawnFloatingPopup(
                 playerState.x,
@@ -1708,11 +2221,35 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
                 playerState.z,
                 `-${bDmg} PRANA`,
                 'deathblow',
-                'SEVERANCE CLEAVE'
+                'WORKFORCE REDUCTION CLEAVE'
+              );
+              world.particlePool.spawnBurst(
+                playerState.x,
+                playerState.y + 1.1,
+                playerState.z,
+                22,
+                false
               );
               if (playerState.hp <= 0) {
-                playerState.hp = Math.round(playerState.maxHp * 0.65);
-                showCombatCallout('PRANA DEPLETED · GARUDA SECOND WIND RESURGENCE!', 2.4);
+                playerState.hp = 0;
+                sound.playPlayerDeath();
+                showCombatCallout(
+                  'TERMINATED BY THE SEPTEMBER LAYOFF — PRANA EXTINGUISHED!',
+                  3.0
+                );
+                if (typeof document !== 'undefined' && document.pointerLockElement) {
+                  try {
+                    document.exitPointerLock?.();
+                  } catch {
+                    // ignore
+                  }
+                }
+                stateRef.current.onPlayerDied();
+              } else {
+                showCombatCallout(
+                  `CRUSHED BY THE SEPTEMBER LAYOFF (-${bDmg} HP) · UNLOCK ALL 6 PROJECTS FOR [Z] ⚡ LIGHTNING BOLT!`,
+                  1.8
+                );
               }
             }
           }
@@ -2046,16 +2583,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
 
-          // 4) Hostile Asura Enemies (within 28m — live decreasing HP & Posture bars!)
+          // 4) Hostile Asura Enemies (within 16m or engaged — live decreasing HP & Posture bars!)
           for (const demon of world.demons) {
             if (!demon.alive) continue;
             const dist = Math.hypot(demon.x - playerState.x, demon.z - playerState.z);
-            if (dist > 28) continue;
+            if (dist > 16 && demon.hp >= demon.maxHp) continue;
             _projVec.set(demon.x, demon.y + 2.9, demon.z).project(camera);
             if (_projVec.z >= -1 && _projVec.z <= 1) {
               const xPct = (_projVec.x * 0.5 + 0.5) * 100;
               const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 6 && xPct <= 94 && yPct >= 10 && yPct <= 88) {
+              if (xPct >= 18 && xPct <= 82 && yPct >= 18 && yPct <= 64) {
                 affordanceMarkers.push({
                   id: demon.id,
                   kind: 'enemy',
@@ -2075,15 +2612,46 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
 
-          // Keep the screen clean by sorting by distance, de-overlapping nearby badges, and showing up to 7 markers
+          // 5) Locked Boss Arena Hologram Affordance (guides from 14m–38m; steps aside within 14m so the 3D Hologram Billboard is 100% unobstructed)
+          if (visitedStopsNow.size < PORTFOLIO_STOPS.length && !boss.awakened && !boss.defeated) {
+            const holoDist = Math.hypot(0 - playerState.x, -45.8 - playerState.z);
+            if (holoDist > 14 && holoDist <= 38) {
+              const holoY = groundHeightAt(0, -45.8) + 3.6;
+              _projVec.set(0, holoY, -45.8).project(camera);
+              if (_projVec.z >= -1 && _projVec.z <= 1) {
+                const xPct = (_projVec.x * 0.5 + 0.5) * 100;
+                const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
+                if (xPct >= 8 && xPct <= 92 && yPct >= 10 && yPct <= 84) {
+                  affordanceMarkers.push({
+                    id: 'boss-lock-hologram',
+                    kind: 'boss_hologram',
+                    xPct,
+                    yPct,
+                    distance: Math.round(holoDist),
+                    title: 'Unlock fight after seeing all the projects',
+                    subtitle: `🔒 BOSS SEALED · ${visitedStopsNow.size}/6 PROJECTS SEEN`,
+                    accentColor: '#38bdf8',
+                  });
+                }
+              }
+            }
+          }
+
+          // Keep the screen clean by sorting by distance, restricting to central corridor, and capping count on mobile landscape
+          const isCompactLandscape = window.innerHeight < 520;
+          const maxMarkerCount = isCompactLandscape ? 2 : 4;
+          const maxMarkerDist = isCompactLandscape ? 20 : 28;
           affordanceMarkers.sort((a, b) => a.distance - b.distance);
           const trimmedMarkers: WorldAffordanceMarker[] = [];
           for (const candidate of affordanceMarkers) {
-            if (trimmedMarkers.length >= 7) break;
+            if (trimmedMarkers.length >= maxMarkerCount) break;
+            if (candidate.distance > maxMarkerDist) continue;
+            candidate.xPct = THREE.MathUtils.clamp(candidate.xPct, 24, 76);
+            candidate.yPct = THREE.MathUtils.clamp(candidate.yPct, 22, 56);
             // Push apart badges that project too close together on screen
             for (const placed of trimmedMarkers) {
-              if (Math.abs(candidate.xPct - placed.xPct) < 15 && Math.abs(candidate.yPct - placed.yPct) < 9.5) {
-                candidate.yPct = Math.max(14, placed.yPct - 10.5);
+              if (Math.abs(candidate.xPct - placed.xPct) < 18 && Math.abs(candidate.yPct - placed.yPct) < 11) {
+                candidate.yPct = THREE.MathUtils.clamp(placed.yPct - 12, 20, 56);
               }
             }
             trimmedMarkers.push(candidate);
@@ -2184,6 +2752,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             bossPosture: Math.round(boss.posture),
             bossMaxPosture: boss.maxPosture,
             bossName: boss.name,
+            lightningUnlocked: canCastLightningBolt(visitedStopsNow.size),
+            lightningCooldown: Number(playerState.lightningCooldown.toFixed(1)),
+            vanquishedDemonIds: world.demons.filter((d) => !d.alive).map((d) => d.id),
             isGliding: playerState.isGliding,
             grappleTargetTitle: grappleCandidate ? grappleCandidate.stop.title : null,
             combatCallout: playerState.combatCallout,
@@ -2218,6 +2789,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       domElem.removeEventListener('pointerdown', onPointerDown);
       domElem.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       domElem.removeEventListener('wheel', onWheel);
       world.dispose();
       renderer.dispose();

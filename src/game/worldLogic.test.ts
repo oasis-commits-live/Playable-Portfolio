@@ -23,6 +23,9 @@ import {
   shouldAwakenLayoffBoss,
   getWorldColliders,
   getRegionNameAt,
+  canCastLightningBolt,
+  computeBossMeleeMultiplier,
+  computeLightningBoltDamage,
   BASE_WALK_SPEED,
   SPRINT_MULTIPLIER,
   PARAGLIDE_TERMINAL_VY,
@@ -30,15 +33,15 @@ import {
 } from './worldLogic';
 import { PORTFOLIO_STOPS, LOTUS_RELICS, FORGE_WEAPONS } from '../data/portfolioStops';
 
-test('groundHeightAt keeps central path walkable, elevates northern mound, and rises on outer mountains', () => {
+test('groundHeightAt keeps central path walkable, elevates northern mound, and rises on walkable mountain peaks', () => {
   const spawnY = groundHeightAt(0, 8);
   assert.ok(Math.abs(spawnY) < 0.05, 'Spawn lookout terrace path should be near y = 0');
 
   const northMoundY = groundHeightAt(0, -26);
   assert.ok(northMoundY > 1.2, 'Northern Sovereign Mandapa sits on an elevated hillock');
 
-  const outerMountainY = groundHeightAt(92, 0);
-  assert.ok(outerMountainY > 4.0, 'Outer mountain peaks beyond 64m should rise dramatically');
+  const outerMountainY = groundHeightAt(98, 0);
+  assert.ok(outerMountainY > 10.0, 'Outer mountain peaks beyond 56m should form tall climbable mountains');
 });
 
 test('walkableSurfaceHeightAt elevates player onto monument plinths, bridge deck, weapon forges, and boulders', () => {
@@ -233,10 +236,20 @@ test('computePlayerCombatStats scales with visited stops and equipped weapon fro
   assert.ok(halberdStats.attackRange > baseStats.attackRange + 1.0);
 });
 
-test('shouldAwakenLayoffBoss, computeCompletionStats, and getRegionNameAt use Portfolio Verse naming', () => {
+test('shouldAwakenLayoffBoss, computeCompletionStats, canCastLightningBolt, and getRegionNameAt work accurately', () => {
   assert.equal(shouldAwakenLayoffBoss(3, 2, false), false);
-  assert.equal(shouldAwakenLayoffBoss(6, 5, false), true);
-  assert.equal(shouldAwakenLayoffBoss(1, 0, true), true);
+  assert.equal(shouldAwakenLayoffBoss(5, 5, true), false, 'Boss cannot be challenged before seeing all 6 projects');
+  assert.equal(shouldAwakenLayoffBoss(6, 0, false), true, 'Boss unlocks once all 6 projects have been seen');
+  assert.equal(shouldAwakenLayoffBoss(6, 5, true), true);
+
+  assert.equal(canCastLightningBolt(5), false);
+  assert.equal(canCastLightningBolt(6), true);
+
+  assert.equal(computeBossMeleeMultiplier(2), 0.25);
+  assert.equal(computeBossMeleeMultiplier(6), 0.65);
+
+  const boltBoss = computeLightningBoltDamage(true);
+  assert.equal(boltBoss.hpDamage, 560);
 
   const full = computeCompletionStats(6, 5, 6, 5);
   assert.equal(full.completionPercent, 100);
@@ -245,3 +258,72 @@ test('shouldAwakenLayoffBoss, computeCompletionStats, and getRegionNameAt use Po
   const valleyRegion = getRegionNameAt(0, 16);
   assert.ok(valleyRegion.includes('Portfolio Verse'));
 });
+
+test('all 6 PORTFOLIO_STOPS map to REFERENCE_CASE_STUDIES with exact framerusercontent images and live links', async () => {
+  const { getReferenceCaseStudy } = await import('../data/referenceCaseStudies');
+  for (const stop of PORTFOLIO_STOPS) {
+    const cs = getReferenceCaseStudy(stop.project.id);
+    assert.equal(cs.id, stop.project.id);
+    assert.ok(cs.heroImage.startsWith('https://framerusercontent.com/images/'), `Hero image for ${cs.id} must be from framerusercontent.com`);
+    assert.ok(cs.galleryImages.length >= 5, `Gallery for ${cs.id} should contain all reference screens`);
+    assert.ok(
+      Boolean(cs.prototypeUrl || cs.externalUrl),
+      `Project ${cs.id} must preserve its exact prototypeUrl or externalUrl`
+    );
+    assert.ok(cs.sections.length >= 4, `Project ${cs.id} must include all 4 case study sections`);
+  }
+});
+
+test('procedural weather system resolves time-of-day profiles and wraps particles within cylinder and terrain bounds', async () => {
+  const {
+    resolveWeatherProfile,
+    createInitialWeatherParticles,
+    stepWeatherParticleInPlace,
+    getNextWeatherPreset,
+    WEATHER_FIELD_RADIUS,
+  } = await import('./weatherSystem');
+
+  const dawnProfile = resolveWeatherProfile('dawn', 'auto');
+  assert.equal(dawnProfile.kind, 'petals');
+  assert.equal(dawnProfile.title, 'Sacred Petal Breeze');
+  assert.ok(dawnProfile.petalVisibility > 0.9);
+
+  const noonProfile = resolveWeatherProfile('noon', 'auto');
+  assert.equal(noonProfile.kind, 'dust_motes');
+  assert.equal(noonProfile.title, 'Solar Dust Motes');
+  assert.ok(noonProfile.moteVisibility > 0.9);
+
+  const twilightProfile = resolveWeatherProfile('twilight', 'auto');
+  assert.equal(twilightProfile.kind, 'spirit_fog');
+  assert.equal(twilightProfile.title, 'Mystic Spirit Fog');
+  assert.ok(twilightProfile.fogDensity > noonProfile.fogDensity);
+
+  // Manual override should take precedence over time of day
+  const overridePetalsAtNoon = resolveWeatherProfile('noon', 'petals');
+  assert.equal(overridePetalsAtNoon.kind, 'petals');
+  assert.equal(overridePetalsAtNoon.presetId, 'petals');
+
+  assert.equal(getNextWeatherPreset('auto'), 'petals');
+  assert.equal(getNextWeatherPreset('petals'), 'dust_motes');
+  assert.equal(getNextWeatherPreset('dust_motes'), 'spirit_fog');
+  assert.equal(getNextWeatherPreset('spirit_fog'), 'auto');
+
+  const particles = createInitialWeatherParticles(20, 20);
+  assert.equal(particles.length, 40);
+  assert.equal(particles[0].isPetal, true);
+  assert.equal(particles[25].isPetal, false);
+
+  // Place a petal far outside the radius and below the ground, then step it
+  const farPetal = { ...particles[0], x: 95, z: 95, y: -15 };
+  stepWeatherParticleInPlace(farPetal, dawnProfile, 0, 8, 2.5, 0.05);
+  const distFromPlayer = Math.hypot(farPetal.x - 0, farPetal.z - 8);
+  assert.ok(
+    distFromPlayer <= WEATHER_FIELD_RADIUS + 0.1,
+    'Particle should wrap inside WEATHER_FIELD_RADIUS cylinder around player'
+  );
+  const localFloor = groundHeightAt(farPetal.x, farPetal.z);
+  assert.ok(farPetal.y >= localFloor, 'Particle should wrap above local terrain height');
+});
+
+
+

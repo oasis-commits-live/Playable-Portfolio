@@ -2,11 +2,11 @@
 
 @layer base {
   :root {
-    --font-display: 'Syne', 'Cormorant Garamond', sans-serif;
-    --font-mythic: 'Cormorant Garamond', Georgia, serif;
-    --font-hud: 'Rajdhani', sans-serif;
-    --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'Space Mono', monospace;
+    --font-display: 'Cinzel Decorative', 'Cinzel', Georgia, serif;
+    --font-mythic: 'Cinzel', Georgia, serif;
+    --font-hud: 'Chakra Petch', sans-serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
   }
 
   body {

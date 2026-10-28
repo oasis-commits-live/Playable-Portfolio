@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   CREATOR_PROFILE,
   CAREER_EXPERIENCE,
@@ -6,6 +6,12 @@ import {
   STORY_CHAPTERS,
   PortfolioStop,
 } from '../data/portfolioStops';
+import {
+  getReferenceCaseStudy,
+  REFERENCE_ENDORSEMENTS,
+  REFERENCE_TOOL_STACK,
+} from '../data/referenceCaseStudies';
+import { CaseStudyVisuals } from './CaseStudyVisuals';
 
 interface StopModalProps {
   stop: PortfolioStop;
@@ -18,6 +24,15 @@ interface StopModalProps {
 
 type ScrollTab = 'project' | 'story' | 'experience' | 'about' | 'contact';
 type CaseStudySection = 'overview' | 'workflow' | 'research';
+
+const SHORT_CASE_STUDY_LABELS: Record<string, string> = {
+  'cfos-ai-workspace': 'HyperLM Vera',
+  'nexatech-bridge': 'Bridge Handoff',
+  'oasis-arcade': 'Oasis Arcade',
+  'payments-copilot': 'Payments Co-Pilot',
+  'hypo-mascot': 'Hypo Mascot',
+  'invoice-copilot': 'Invoice Co-Pilot',
+};
 
 export const StopModal: React.FC<StopModalProps> = ({
   stop,
@@ -34,10 +49,29 @@ export const StopModal: React.FC<StopModalProps> = ({
   const [messageText, setMessageText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const currentIdx = PORTFOLIO_STOPS.findIndex((s) => s.id === stop.id);
   const prevStop = PORTFOLIO_STOPS[(currentIdx - 1 + PORTFOLIO_STOPS.length) % PORTFOLIO_STOPS.length];
   const nextStop = PORTFOLIO_STOPS[(currentIdx + 1) % PORTFOLIO_STOPS.length];
+
+  const proj = stop.project;
+  const cs = getReferenceCaseStudy(proj.id);
+  const nextCs = getReferenceCaseStudy(nextStop.project.id);
+  const nextShortTitle = SHORT_CASE_STUDY_LABELS[nextStop.project.id] || nextCs.externalLabel;
+  const projectHref = cs.prototypeUrl || cs.externalUrl || '';
+  const projectCtaLabel = cs.prototypeUrl ? 'Live Prototype' : 'Live Product';
+
+  const handleJumpToSection = (sectionId: string) => {
+    setActiveTab('project');
+    setCaseSection('overview');
+    setTimeout(() => {
+      const el = document.getElementById(`cs-section-${sectionId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 40);
+  };
 
   const handleCommissionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +96,10 @@ export const StopModal: React.FC<StopModalProps> = ({
       designer: CREATOR_PROFILE,
       storyChronicle: STORY_CHAPTERS,
       careerExperience: CAREER_EXPERIENCE,
-      featuredProjects: PORTFOLIO_STOPS.map((s) => s.project),
+      featuredProjects: PORTFOLIO_STOPS.map((s) => ({
+        ...s.project,
+        referenceCaseStudy: getReferenceCaseStudy(s.project.id),
+      })),
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -74,32 +111,30 @@ export const StopModal: React.FC<StopModalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const proj = stop.project;
-
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="stop-modal-title"
-      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-[#03050a]/88 pointer-events-auto backdrop-blur-md"
+      className="fixed inset-0 z-30 flex items-center justify-center p-2 sm:p-4 lg:p-6 bg-[#03050a]/88 pointer-events-auto backdrop-blur-md"
     >
       {/* Widescreen AAA Mythic Codex Split-View */}
-      <div className="relative w-full max-w-[1040px] h-[84vh] bg-[#070b13] border border-[#d4af37]/45 shadow-[0_30px_90px_rgba(0,0,0,0.96)] flex flex-col lg:flex-row overflow-hidden text-[#f4efe6]">
-        {/* LEFT COLUMN: SANCTUM ARCHIVE SELECTOR & FORGED ASTRA WEAPON PANEL */}
-        <aside className="w-full lg:w-[290px] bg-[#05080f] border-b lg:border-b-0 lg:border-r border-[#d4af37]/25 p-5 flex flex-col justify-between shrink-0">
-          <div className="space-y-4">
+      <div className="relative w-full max-w-[1140px] h-[92vh] lg:h-[88vh] bg-[#070b13] border border-[#d4af37]/45 shadow-[0_30px_90px_rgba(0,0,0,0.96)] flex flex-row overflow-hidden text-[#f4efe6]">
+        {/* LEFT COLUMN: SANCTUM ARCHIVE SELECTOR, CASE STUDY STRUCTURE & ASTRA WEAPON PANEL */}
+        <aside className="w-[210px] sm:w-[240px] lg:w-[295px] bg-[#05080f] border-r border-[#d4af37]/25 p-3 lg:p-5 flex flex-col justify-between shrink-0 overflow-y-auto">
+          <div className="space-y-3.5 lg:space-y-4">
             <div className="flex items-center justify-between">
-              <span className="font-hud text-xs font-bold tracking-[0.24em] uppercase text-[#d4af37]">
-                SANCTUM ARCHIVE {stop.indexNumber}/06
+              <span className="font-hud text-[11px] lg:text-xs font-bold tracking-[0.2em] uppercase text-[#d4af37]">
+                SANCTUM {stop.indexNumber}/06
               </span>
-              <span className="font-mono text-[10px] text-[#2dd4bf]">
+              <span className="font-mono text-[9px] lg:text-[10px] text-[#2dd4bf]">
                 {visitedStopIds.size}/6 AWAKENED
               </span>
             </div>
 
             {/* Sacred Geometric Astra Mandala SVG */}
-            <div className="relative py-4 flex flex-col items-center justify-center border border-[#d4af37]/20 bg-[#080d18]">
-              <svg width="84" height="84" viewBox="0 0 100 100" className="mb-2">
+            <div className="relative py-2.5 lg:py-3.5 flex flex-col items-center justify-center border border-[#d4af37]/20 bg-[#080d18]">
+              <svg width="56" height="56" viewBox="0 0 100 100" className="mb-1 lg:w-[72px] lg:h-[72px]">
                 <circle
                   cx="50"
                   cy="50"
@@ -124,35 +159,60 @@ export const StopModal: React.FC<StopModalProps> = ({
                 />
                 <circle cx="50" cy="50" r="8" fill="#d4af37" />
               </svg>
-              <div className="font-hud text-xs font-bold tracking-[0.18em] uppercase text-[#2dd4bf]">
+              <div className="font-hud text-[11px] lg:text-xs font-bold tracking-[0.16em] uppercase text-[#2dd4bf]">
                 +{stop.unlockedPower.bonusDamage} ATK FORGED
               </div>
-              <div className="font-mythic italic text-sm text-[#f4efe6] text-center px-3 mt-0.5">
+              <div className="font-mythic italic text-xs text-[#f4efe6] text-center px-2 mt-0.5">
                 {stop.unlockedPower.name}
               </div>
             </div>
 
+            {/* Case Study Structure Jump Index (Transferred from Reference Portfolio Sidebar) */}
+            <div className="p-3 bg-[#080d18] border border-[#d4af37]/20 space-y-1.5">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-[#94a3b8] pb-1 border-b border-[#d4af37]/15">
+                Case Study Structure
+              </div>
+              {cs.sections.map((sec, idx) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => handleJumpToSection(sec.id)}
+                  className="w-full text-left px-2 py-1.5 bg-[#0b1220] hover:bg-[#d4af37] hover:text-[#05070b] text-[#e2e8f0] font-mono text-[11px] transition-colors flex items-center justify-between cursor-pointer"
+                >
+                  <span className="truncate">
+                    {String(idx + 1).padStart(2, '0')}. {sec.title}
+                  </span>
+                  <span>→</span>
+                </button>
+              ))}
+            </div>
+
             {/* 01–06 Sanctum Fast-Switch List */}
-            <div className="hidden lg:block space-y-1">
+            <div className="space-y-1">
               <div className="font-hud text-[10px] font-bold tracking-[0.2em] uppercase text-[#94a3b8] pb-1">
-                ALL 6 SHIPPED PRODUCTS
+                ALL 6 CASE STUDIES
               </div>
               {PORTFOLIO_STOPS.map((s) => {
                 const isSelected = s.id === stop.id;
                 const isVisited = visitedStopIds.has(s.id);
+                const stopCs = getReferenceCaseStudy(s.project.id);
+                const shortLabel = SHORT_CASE_STUDY_LABELS[s.project.id] || stopCs.externalLabel;
                 return (
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => onSelectStop(s.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 clip-blade-right text-left transition-all cursor-pointer border-l-2 ${
+                    onClick={() => {
+                      onSelectStop(s.id);
+                      scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 lg:px-3 lg:py-2 clip-blade-right text-left transition-all cursor-pointer border-l-2 ${
                       isSelected
                         ? 'bg-[#d4af37] text-[#05070b] border-[#fef9c3] font-bold'
                         : 'bg-[#0a101d] hover:bg-[#111b30] text-[#cbd5e1] border-[#d4af37]/30'
                     }`}
                   >
-                    <span className="font-hud text-xs uppercase tracking-wider truncate">
-                      {s.indexNumber}. {s.project.title.split('—')[0].trim()}
+                    <span className="font-hud text-[11px] uppercase tracking-wider truncate">
+                      {s.indexNumber}. {shortLabel}
                     </span>
                     <span
                       className={`font-mono text-[9px] shrink-0 ${
@@ -172,18 +232,24 @@ export const StopModal: React.FC<StopModalProps> = ({
           </div>
 
           {/* Prev / Next Sanctum Switcher */}
-          <div className="hidden lg:flex items-center justify-between gap-2 pt-3 border-t border-[#d4af37]/20 font-hud text-xs uppercase tracking-wider">
+          <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-[#d4af37]/20 font-hud text-xs uppercase tracking-wider">
             <button
               type="button"
-              onClick={() => onSelectStop(prevStop.id)}
-              className="px-2.5 py-1.5 bg-[#0c1424] hover:bg-[#16233d] border border-[#d4af37]/30 text-[#e2e8f0] cursor-pointer"
+              onClick={() => {
+                onSelectStop(prevStop.id);
+                scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="px-2.5 py-1 bg-[#0c1424] hover:bg-[#16233d] border border-[#d4af37]/30 text-[#e2e8f0] cursor-pointer"
             >
               ← Prev
             </button>
             <button
               type="button"
-              onClick={() => onSelectStop(nextStop.id)}
-              className="px-2.5 py-1.5 bg-[#0c1424] hover:bg-[#16233d] border border-[#d4af37]/30 text-[#e2e8f0] cursor-pointer"
+              onClick={() => {
+                onSelectStop(nextStop.id);
+                scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="px-2.5 py-1 bg-[#0c1424] hover:bg-[#16233d] border border-[#d4af37]/30 text-[#e2e8f0] cursor-pointer"
             >
               Next →
             </button>
@@ -193,41 +259,57 @@ export const StopModal: React.FC<StopModalProps> = ({
         {/* RIGHT COLUMN: EDITORIAL CASE STUDY & PORTFOLIO CODEX */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Top Header */}
-          <header className="px-6 pt-5 pb-4 border-b border-[#d4af37]/20 bg-[#080d18] flex items-start justify-between gap-4">
+          <header className="px-4 lg:px-6 pt-3 lg:pt-4 pb-2.5 lg:pb-3.5 border-b border-[#d4af37]/20 bg-[#080d18] flex items-start justify-between gap-4">
             <div className="space-y-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2 font-hud text-xs font-bold tracking-[0.2em] uppercase text-[#d4af37]">
-                <span>{proj.company}</span>
-                <span className="text-[#64748b]">/</span>
-                <span>{proj.year}</span>
-                <span className="text-[#64748b]">/</span>
-                <span className="text-[#2dd4bf]">{proj.subtitle ?? proj.domain}</span>
+              <div className="flex flex-wrap items-center gap-2 font-hud text-xs font-bold tracking-[0.18em] uppercase text-[#d4af37]">
+                <span>{cs.client}</span>
+                <span className="text-[#64748b]">·</span>
+                <span>{cs.projectType}</span>
+                <span className="text-[#64748b]">·</span>
+                <span>{cs.year}</span>
+                <span className="text-[#64748b]">·</span>
+                <span className="text-[#2dd4bf]">{cs.category}</span>
               </div>
               <h2
                 id="stop-modal-title"
-                className="font-display text-xl sm:text-2xl font-extrabold text-[#f8f5ee] tracking-tight leading-snug"
+                className="font-display text-lg sm:text-xl lg:text-2xl font-extrabold text-[#f8f5ee] tracking-tight leading-snug"
               >
-                {proj.title}
+                {cs.title}
               </h2>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Ancient Scroll"
-              className="px-3.5 py-1.5 clip-blade-right bg-[#131d31] hover:bg-[#d4af37] hover:text-[#05070b] border-l-2 border-[#d4af37] font-hud text-xs font-bold tracking-[0.18em] uppercase text-[#f8f5ee] transition-colors cursor-pointer shrink-0"
-            >
-              Close [Esc]
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {projectHref && (
+                <a
+                  href={projectHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="header-project-external-link"
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-hud text-xs font-bold tracking-[0.14em] uppercase transition-colors cursor-pointer"
+                >
+                  <span>{projectCtaLabel}</span>
+                  <span>↗</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close Ancient Scroll"
+                className="px-3.5 py-1.5 clip-blade-right bg-[#131d31] hover:bg-[#d4af37] hover:text-[#05070b] border-l-2 border-[#d4af37] font-hud text-xs font-bold tracking-[0.18em] uppercase text-[#f8f5ee] transition-colors cursor-pointer shrink-0"
+              >
+                Close [Esc]
+              </button>
+            </div>
           </header>
 
-          {/* Primary Codex Navigation Tabs + Sub-Section Switcher */}
-          <div className="px-6 py-2.5 bg-[#060a12] border-b border-[#d4af37]/20 flex flex-wrap items-center justify-between gap-2">
+          {/* Primary Codex Navigation Tabs + Sub-Section Filter */}
+          <div className="px-4 lg:px-6 py-2 bg-[#060a12] border-b border-[#d4af37]/20 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1">
               {(
                 [
                   { id: 'project', label: '01. Case Study' },
                   { id: 'story', label: '02. 5-Act Saga' },
-                  { id: 'experience', label: '03. 4 Career Roles' },
+                  { id: 'experience', label: '03. Experience' },
                   { id: 'about', label: '04. Craft & Stack' },
                   { id: 'contact', label: '05. Connect' },
                 ] as { id: ScrollTab; label: string }[]
@@ -251,9 +333,9 @@ export const StopModal: React.FC<StopModalProps> = ({
               <div className="flex items-center gap-1 bg-[#0b1220] p-0.5 border border-[#d4af37]/25">
                 {(
                   [
-                    { id: 'overview', label: 'Overview' },
-                    { id: 'workflow', label: 'Architecture' },
-                    { id: 'research', label: 'Research & UX' },
+                    { id: 'overview', label: 'Full Case Study' },
+                    { id: 'workflow', label: 'Process & Screens' },
+                    { id: 'research', label: 'Problem & Impact' },
                   ] as { id: CaseStudySection; label: string }[]
                 ).map((sec) => (
                   <button
@@ -274,149 +356,55 @@ export const StopModal: React.FC<StopModalProps> = ({
           </div>
 
           {/* Main Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-            {activeTab === 'project' && caseSection === 'overview' && (
+          <div
+            ref={scrollContainerRef}
+            className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-5"
+          >
+            {activeTab === 'project' && (
               <>
-                {/* 3 High-Impact Quantitative Metrics */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                  {stop.keyMetrics.map((m) => (
-                    <div
-                      key={m.label}
-                      className="p-4 bg-[#0b111e] border border-[#d4af37]/25 space-y-1"
+                <CaseStudyVisuals
+                  projectId={proj.id}
+                  accentColor={stop.accentColor}
+                  activeSection={caseSection}
+                />
+
+                {/* Bottom Case Study Navigation Footer (Matching Reference Portfolio) */}
+                <div className="pt-4 border-t border-[#d4af37]/25 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-4 py-2.5 bg-[#0c1424] hover:bg-[#16233d] border border-[#d4af37]/35 font-hud text-xs font-bold uppercase tracking-wider text-[#f8f5ee] cursor-pointer"
                     >
-                      <div className="font-hud text-2xl font-bold text-[#d4af37] tabular-nums">
-                        {m.value}
-                      </div>
-                      <div className="font-sans text-xs font-semibold text-[#f8f5ee]">{m.label}</div>
-                      <div className="font-sans text-[11px] text-[#94a3b8] leading-snug">
-                        {m.context}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Narrative Executive Overview */}
-                <div className="p-5 bg-[#0a101d] border border-[#d4af37]/20 space-y-2.5">
-                  <h3 className="font-mythic italic text-xl text-[#d4af37]">{stop.headline}</h3>
-                  {stop.narrativeProse.map((p, idx) => (
-                    <p key={idx} className="font-sans text-xs sm:text-sm text-[#cbd5e1] leading-relaxed">
-                      {p}
-                    </p>
-                  ))}
-                </div>
-
-                {/* Problem & Architecture Split */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div className="p-4 bg-[#0b111e] border border-[#d4af37]/20 space-y-1.5">
-                    <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#f43f5e]">
-                      The Challenge
-                    </div>
-                    <p className="font-sans text-xs text-[#cbd5e1] leading-relaxed">
-                      {proj.problemStatement}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-[#0b111e] border border-[#d4af37]/20 space-y-1.5">
-                    <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#2dd4bf]">
-                      Architecture &amp; Solution
-                    </div>
-                    <p className="font-sans text-xs text-[#cbd5e1] leading-relaxed">
-                      {proj.approachSummary}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Outcome & Stack */}
-                <div className="p-4 bg-[#0c1424] border border-[#d4af37]/30 flex flex-wrap items-center justify-between gap-3">
-                  <div className="font-sans text-xs text-[#f8f5ee]">
-                    <strong className="font-hud text-[#d4af37] uppercase tracking-wider mr-2">
-                      Measured Impact:
-                    </strong>
-                    {proj.resultsImpact}
-                  </div>
-                  <div className="flex flex-wrap gap-2 font-mono text-[10px] text-[#2dd4bf]">
-                    {proj.techStack.map((t, i) => (
-                      <span key={t}>
-                        {t}
-                        {i < proj.techStack.length - 1 ? ' · ' : ''}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeTab === 'project' && caseSection === 'workflow' && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {proj.workflowArchitecture.map((stage) => (
-                    <div
-                      key={stage.step}
-                      className="p-4 bg-[#0b111e] border border-[#d4af37]/25 space-y-1.5"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-[#d4af37]">
-                          {stage.step}.
-                        </span>
-                        <span className="font-hud text-sm font-bold uppercase tracking-wider text-[#f8f5ee]">
-                          {stage.title}
-                        </span>
-                      </div>
-                      <p className="font-sans text-xs text-[#cbd5e1] leading-relaxed">
-                        {stage.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="p-4 bg-[#0a101d] border border-[#d4af37]/20 space-y-2.5">
-                  <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#2dd4bf]">
-                    Shipped Product Capabilities
-                  </div>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-sans text-xs text-[#cbd5e1]">
-                    {proj.keyFeatures.map((feat, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-1.5 w-1.5 h-1.5 rotate-45 bg-[#d4af37] shrink-0" />
-                        <span className="leading-snug">{feat}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </>
-            )}
-
-            {activeTab === 'project' && caseSection === 'research' && (
-              <>
-                <div className="p-4 bg-[#0b111e] border border-[#d4af37]/25 space-y-2.5">
-                  <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
-                    User Research &amp; Discovery Insights
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {proj.researchInsights.map((insight, idx) => (
-                      <div
-                        key={idx}
-                        className="p-3 bg-[#070b14] border border-[#d4af37]/15 font-sans text-xs text-[#cbd5e1] leading-snug"
+                      ← Return to 3D World
+                    </button>
+                    {projectHref && (
+                      <a
+                        href={projectHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2.5 bg-[#091921] hover:bg-[#102d3b] border border-[#2dd4bf]/50 font-hud text-xs font-bold uppercase tracking-wider text-[#2dd4bf] inline-flex items-center gap-2 cursor-pointer"
                       >
-                        <strong className="font-mono text-[#2dd4bf] mr-1.5">R{idx + 1}.</strong>
-                        {insight}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-[#0a101d] border border-[#d4af37]/20 space-y-2.5">
-                  <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
-                    Key UX &amp; Architecture Decisions
-                  </div>
-                  <ul className="space-y-2 font-sans text-xs text-[#cbd5e1]">
-                    {proj.designDecisions.map((dec, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-1.5 w-1.5 h-1.5 rotate-45 bg-[#2dd4bf] shrink-0" />
-                        <span className="leading-snug">
-                          <strong className="text-[#f8f5ee]">{dec.title}:</strong> {dec.rationale}
+                        <span>
+                          {projectCtaLabel}: {cs.externalLabel}
                         </span>
-                      </li>
-                    ))}
-                  </ul>
+                        <span>↗</span>
+                      </a>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectStop(nextStop.id);
+                      scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="px-5 py-2.5 clip-blade-right bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-hud text-xs font-bold uppercase tracking-wider inline-flex items-center justify-between sm:justify-center gap-2.5 cursor-pointer"
+                  >
+                    <span className="opacity-75">Next Case Study:</span>
+                    <span className="truncate max-w-[230px]">{nextShortTitle}</span>
+                    <span>→</span>
+                  </button>
                 </div>
               </>
             )}
@@ -452,7 +440,26 @@ export const StopModal: React.FC<StopModalProps> = ({
             )}
 
             {activeTab === 'experience' && (
-              <div className="space-y-3">
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between p-3.5 bg-[#09101d] border border-[#d4af37]/30">
+                  <div>
+                    <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
+                      CAREER TRACK RECORD &amp; EDUCATION
+                    </div>
+                    <div className="font-mono text-[11px] text-[#94a3b8]">
+                      {CREATOR_PROFILE.education}
+                    </div>
+                  </div>
+                  <a
+                    href={CREATOR_PROFILE.resumeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-1.5 bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-hud text-xs font-bold uppercase tracking-wider cursor-pointer shrink-0"
+                  >
+                    View / Download Resume ↗
+                  </a>
+                </div>
+
                 {CAREER_EXPERIENCE.map((exp, idx) => (
                   <div
                     key={exp.institution}
@@ -474,18 +481,90 @@ export const StopModal: React.FC<StopModalProps> = ({
                     </ul>
                   </div>
                 ))}
+
+                {/* Collaborator Endorsements from Reference Portfolio */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  {REFERENCE_ENDORSEMENTS.map((end) => (
+                    <div
+                      key={end.author}
+                      className="p-4 bg-[#09101d] border border-[#d4af37]/20 space-y-2"
+                    >
+                      <p className="font-sans text-xs italic text-[#e2e8f0] leading-relaxed">
+                        “{end.quote}”
+                      </p>
+                      <div className="font-mono text-[11px] text-[#d4af37]">
+                        {end.author} · <span className="text-[#94a3b8]">{end.role}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
             {activeTab === 'about' && (
-              <div className="space-y-3.5">
-                <div className="p-4 bg-[#0b111e] border border-[#d4af37]/25 space-y-1.5">
-                  <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
-                    {CREATOR_PROFILE.name} · {CREATOR_PROFILE.title}
+              <div className="space-y-4">
+                <div className="p-4 bg-[#0b111e] border border-[#d4af37]/25 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
+                      {CREATOR_PROFILE.name} · {CREATOR_PROFILE.title}
+                    </div>
+                    <a
+                      href={CREATOR_PROFILE.resumeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1 bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-hud text-[11px] font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                      Open Official Resume PDF ↗
+                    </a>
                   </div>
                   <p className="font-sans text-xs sm:text-sm text-[#cbd5e1] leading-relaxed">
                     {CREATOR_PROFILE.manifesto}
                   </p>
+                  <div className="pt-1 font-mono text-[11px] text-[#2dd4bf]">
+                    🎓 {CREATOR_PROFILE.education} · 📍 {CREATOR_PROFILE.location}
+                  </div>
+                </div>
+
+                {/* Toolkit & Daily Arsenal with Authentic Logos & Links from Reference Portfolio */}
+                <div className="p-4 bg-[#09101d] border border-[#d4af37]/25 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#d4af37]">
+                      MY STACK · 9 PRIMARY TOOLS &amp; WORKFLOWS
+                    </span>
+                    <span className="font-mono text-[10px] text-[#2dd4bf]">
+                      Click any tool to open
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {REFERENCE_TOOL_STACK.map((item) => (
+                      <a
+                        key={item.tool}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2.5 bg-[#0b1324] hover:bg-[#13203b] border border-[#d4af37]/25 hover:border-[#d4af37] flex items-center justify-between gap-2.5 transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img
+                            src={item.remoteLogo}
+                            alt={`${item.tool} logo`}
+                            className="w-8 h-8 object-contain bg-[#060911] p-1 border border-white/10 shrink-0"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-hud text-xs font-bold text-[#f8f5ee] truncate">
+                              {item.tool}
+                            </div>
+                            <div className="font-mono text-[10px] text-[#94a3b8] truncate">
+                              {item.category}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="font-mono text-xs text-[#d4af37] shrink-0">↗</span>
+                      </a>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -532,6 +611,42 @@ export const StopModal: React.FC<StopModalProps> = ({
                   >
                     Export JSON Dossier
                   </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 p-3.5 bg-[#09101d] border border-[#d4af37]/20 font-mono text-xs text-[#cbd5e1]">
+                  <a
+                    href={CREATOR_PROFILE.linkedinUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#d4af37] hover:underline"
+                  >
+                    LinkedIn ↗
+                  </a>
+                  <span>/</span>
+                  <a
+                    href={CREATOR_PROFILE.behanceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#d4af37] hover:underline"
+                  >
+                    Behance ↗
+                  </a>
+                  <span>/</span>
+                  <a
+                    href={CREATOR_PROFILE.instagramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#d4af37] hover:underline"
+                  >
+                    Instagram ↗
+                  </a>
+                  <span>/</span>
+                  <a
+                    href={`mailto:${CREATOR_PROFILE.email}`}
+                    className="text-[#2dd4bf] hover:underline"
+                  >
+                    {CREATOR_PROFILE.email}
+                  </a>
                 </div>
 
                 <form
