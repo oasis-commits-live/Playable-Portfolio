@@ -45,27 +45,6 @@ export const BASE_ATTACK_RANGE = 4.8;
 export const MAX_GRAPPLE_DISTANCE = 56;
 export const MAX_STEP_UP_HEIGHT = 0.78;
 
-
-
-/**
- * Finds the next unvisited PortfolioStop for guidance.
- */
-export function findNextGuidanceSanctum(
-  playerPos: Vec2XZ,
-  visitedStopIds: ReadonlySet<string>,
-  stops: PortfolioStop[] = PORTFOLIO_STOPS
-): { stop: PortfolioStop; distance: number } | null {
-  // Sort stops by index or proximity? Usually index for a portfolio.
-  const unvisited = stops.filter((s) => !visitedStopIds.has(s.id));
-  if (unvisited.length === 0) return null;
-
-  // Find the one with the lowest index first
-  const nextByIndex = unvisited.sort((a, b) => a.indexNumber.localeCompare(b.indexNumber))[0];
-  const distance = Math.hypot(playerPos.x - nextByIndex.position.x, playerPos.z - nextByIndex.position.z);
-
-  return { stop: nextByIndex, distance };
-}
-
 export const BOULDER_OUTCROPS: ReadonlyArray<{ x: number; z: number; scale: number }> = [
   { x: -8.5, z: 4.2, scale: 1.0 },
   { x: 8.8, z: 3.8, scale: 1.05 },

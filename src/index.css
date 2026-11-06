@@ -2,16 +2,11 @@
 
 @layer base {
   :root {
-    --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: 'Cinzel Decorative', 'Cinzel', Georgia, serif;
     --font-mythic: 'Cinzel', Georgia, serif;
-    --font-hud: 'Plus Jakarta Sans', sans-serif;
+    --font-hud: 'Chakra Petch', sans-serif;
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    
-    --ui-glass: rgba(6, 10, 18, 0.65);
-    --ui-glass-border: rgba(255, 255, 255, 0.08);
-    --ui-accent: #d4af37;
-    --ui-accent-glow: rgba(212, 175, 55, 0.4);
   }
 
   body {
@@ -26,7 +21,6 @@
 
 .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
 }
 
 .font-mythic {
@@ -36,7 +30,6 @@
 .font-hud {
   font-family: var(--font-hud);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.05em;
 }
 
 .font-sans {
@@ -48,83 +41,56 @@
   font-variant-numeric: tabular-nums;
 }
 
-.glass-panel {
-  background: var(--ui-glass);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--ui-glass-border);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-}
-
-.glass-button {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.glass-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.glass-button.active {
-  background: var(--ui-accent);
-  color: #05070b;
-  border-color: var(--ui-accent);
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Chamfered & Tactical AAA HUD Clip Paths */
 .clip-blade-right {
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
 }
 
 .clip-chamfer {
   clip-path: polygon(
-    10px 0,
-    calc(100% - 10px) 0,
-    100% 10px,
-    100% calc(100% - 10px),
-    calc(100% - 10px) 100%,
-    10px 100%,
-    0 calc(100% - 10px),
-    0 10px
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
   );
+}
+
+.clip- slanted-bar {
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
 }
 
 /* Subtle Cinematic Vignette Overlay on 3D Viewport */
 .cinematic-vignette {
   background: radial-gradient(
     circle at 50% 50%,
-    rgba(5, 7, 11, 0) 50%,
-    rgba(4, 6, 12, 0.3) 80%,
-    rgba(2, 4, 8, 0.6) 100%
+    rgba(5, 7, 11, 0) 58%,
+    rgba(4, 6, 12, 0.42) 86%,
+    rgba(2, 4, 8, 0.78) 100%
   );
 }
 
 /* Custom subtle scrollbars for codex panels */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(6, 9, 15, 0.3);
+  background: rgba(6, 9, 15, 0.75);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
-  border-radius: 2px;
+  background: rgba(212, 175, 55, 0.45);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.6);
-}
-
-@keyframes hud-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(0.98); }
-}
-
-.animate-hud-pulse {
-  animation: hud-pulse 2s infinite ease-in-out;
+  background: rgba(212, 175, 55, 0.85);
 }

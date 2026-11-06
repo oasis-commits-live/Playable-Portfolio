@@ -103,8 +103,8 @@ export function createProceduralWeatherRig(
   let currentPreset: WeatherPresetId = 'auto';
   let activeProfile: WeatherProfile = resolveWeatherProfile(currentTimeOfDay, currentPreset);
 
-  const petalCount = 320;
-  const moteCount = 320;
+  const petalCount = 180;
+  const moteCount = 180;
   const particles: WeatherParticleState[] = createInitialWeatherParticles(petalCount, moteCount);
 
   // 1. Falling Lotus & Blossom Petals (InstancedMesh)

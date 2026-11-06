@@ -164,15 +164,15 @@ export const STORY_CHAPTERS: StoryChapter[] = [
     title: 'Lead Product Designer at Cheggout & The September Layoff',
     era: 'May 2026 — Sept 2026',
     summary:
-      "Led org-wide brand design systems and internal Ops reward engines at Cheggout — before a sudden restructuring layoff struck. This world is the answer: turning craft into weapons.",
+      'Led org-wide brand design systems, internal multi-channel Ops reward platforms, and banking Mystery Box UX at Cheggout — before a sudden September restructuring layoff struck.',
     unlockCondition: 'Inspect all 6 Project Scrolls in the Valley to Unlock the Layoff Boss',
   },
   {
     act: 'ACT V',
-    title: 'Craft Prevails: Vanquishing the Corporate Restructuring',
+    title: 'Craft Prevails: Vanquishing The September Layoff',
     era: 'Present · Ready for the Next Chapter',
     summary:
-      'Armed with 6 shipped product powers and 4+ years of cross-disciplinary mastery, confront the September Layoff Colossus in the Northern Citadel.',
+      'Armed with 6 shipped product powers and 4 years of cross-disciplinary mastery, confront and defeat the September Layoff Colossus in the Northern Citadel.',
     unlockCondition: 'Defeat Maha-Asura: The September Layoff',
   },
 ];
@@ -255,9 +255,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Across a $12B+ mid-market finance automation landscape (50,000+ enterprises growing at 23% CAGR), CFOs suffer from severe context switching across 15+ disconnected tools. By benchmarking Notion, Perplexity, Genspark, and Grok alongside partner CFO consultants, I architected a high-trust financial workspace with zero hallucination ambiguity.',
     ],
     keyMetrics: [
-      { label: 'Efficiency Gain', value: '15+ → 1', context: 'Consolidated fragmented tools into one command center' },
-      { label: 'Morning Ritual', value: '62%', context: 'Time reclaimed from triaging controller emails' },
-      { label: 'Market Potential', value: '$12B+', context: '50k+ mid-market enterprises growing at 23% CAGR' },
+      { label: 'Target Market', value: '$12B+', context: '23% CAGR across 50,000+ mid-market finance teams' },
+      { label: 'Tool Consolidation', value: '15+ → 1', context: 'Unifies emails, ERP docs, forecasting & market news' },
+      { label: 'AI Paradigm', value: 'Digital Twin', context: 'Human-in-the-loop conversational finance companion' },
     ],
     unlockedPower: {
       id: 'power-vera',
@@ -443,9 +443,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Beyond nostalgia, Oasis validated a complete AI-native design-to-production engineering pipeline: crafting the tactile retro UI system in Figma, authoring rigorous physics & state-machine PRDs with ChatGPT and Perplexity, compiling interactive frontend code in Figma Make, and wiring a live Supabase backend with PostgreSQL leaderboards, Edge Functions, and retro chiptune storage buckets.',
     ],
     keyMetrics: [
-      { label: 'Week-1 Adoption', value: '100+', context: 'Organic active players within first 7 days' },
-      { label: 'Session Lift', value: '+10m', context: 'Average playtime increase after shipping Zen Stack' },
-      { label: 'Pipeline', value: 'AI-Native', context: 'Full-stack delivery via Figma Make & Supabase' },
+      { label: 'Week-1 Adoption', value: '100+ Players', context: 'Organic active users within the first 7 days of launch' },
+      { label: 'Session Lift', value: '+10 Mins', context: 'Average playtime increase after shipping Zen Stack' },
+      { label: 'Full-Stack AI', value: 'Figma → Supabase', context: 'Live auth, Edge Functions, leaderboards & audio buckets' },
     ],
     unlockedPower: {
       id: 'power-oasis',
@@ -631,9 +631,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Through hand-sketched character exploration synchronized with a company-wide brand mark redesign, I reimagined Hypo into a warm, expressive, geometrically harmonized companion across in-product AI Co-Pilots and social storytelling — propelling Hyperbots’ LinkedIn audience from 10,000 to 28,000 followers (+180%).',
     ],
     keyMetrics: [
-      { label: 'Community Surge', value: '+180%', context: 'LinkedIn audience grew from 10k to 28k followers' },
-      { label: 'Strategic Role', value: 'Humanizer', context: 'Turned robotic automation into helpful collaboration' },
-      { label: 'Impact', value: 'Omnichannel', context: 'Unified across SaaS UI, video, and social storytelling' },
+      { label: 'Community Surge', value: '10k → 28k', context: '+180% LinkedIn follower growth via mascot storytelling' },
+      { label: 'Mission Scale', value: '2,000+ Cos', context: 'Humanized AI adoption for mid-market finance teams' },
+      { label: 'Omnichannel', value: 'Product + Social', context: 'Unified across Co-Pilot UI states, video & events' },
     ],
     unlockedPower: {
       id: 'power-mascot',

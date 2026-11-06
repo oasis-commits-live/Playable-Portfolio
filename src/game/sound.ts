@@ -402,9 +402,9 @@ class SoundEngine {
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(onStone ? 920 : 540, now);
 
-    const stepVol = sprint ? 0.28 : 0.22;
+    const stepVol = sprint ? 0.165 : 0.125;
     gain.gain.setValueAtTime(stepVol, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
 
     // 2. High-frequency surface transient (crisp stone clack vs. grassy turf rustle)
     tapOsc.type = onStone ? 'square' : 'sawtooth';

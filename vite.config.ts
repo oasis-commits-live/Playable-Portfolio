@@ -8,7 +8,7 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(import.meta.dirname, '.'),
+        '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
@@ -22,18 +22,12 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
     build: {
-      chunkSizeWarningLimit: 1200,
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules/three')) {
               return 'three-vendor';
-            }
-            if (id.includes('node_modules/firebase')) {
-              return 'firebase-vendor';
-            }
-            if (id.includes('node_modules/lucide-react')) {
-              return 'lucide-vendor';
             }
           },
         },
