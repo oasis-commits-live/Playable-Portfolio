@@ -7,14 +7,16 @@ import {
 } from '../data/portfolioStops';
 import { sound } from '../game/sound';
 import { getReferenceCaseStudy } from '../data/referenceCaseStudies';
+import { GameMode } from '../App';
 
 interface TitleScreenProps {
-  onStart: () => void;
+  onStart: (mode: GameMode) => void;
   onInspectProject?: (stopId: string) => void;
+  leaderboard: { name: string; score: number; wave: number }[];
   gamepadConnected: boolean;
 }
 
-type ModalSection = null | 'howto' | 'sanctums' | 'saga';
+type ModalSection = null | 'howto' | 'sanctums' | 'saga' | 'leaderboard';
 
 /**
  * Ornate symmetrical pointer flourish flanking the focused menu item (Hollow Knight style)
@@ -80,6 +82,7 @@ const MenuPointerRight: React.FC<{ active: boolean }> = ({ active }) => (
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStart,
   onInspectProject,
+  leaderboard,
   gamepadConnected,
 }) => {
   const [hoveredItem, setHoveredItem] = useState<number>(0);
@@ -97,9 +100,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         return;
       }
       if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-        setHoveredItem((prev) => (prev + 1) % 4);
+        setHoveredItem((prev) => (prev + 1) % 5);
       } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-        setHoveredItem((prev) => (prev - 1 + 4) % 4);
+        setHoveredItem((prev) => (prev - 1 + 5) % 5);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -391,7 +394,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             onFocus={() => setHoveredItem(0)}
             onClick={(e) => {
               e.currentTarget.blur();
-              onStart();
+              onStart('portfolio');
             }}
             className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
           >
@@ -409,9 +412,43 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     : '0 4px 14px rgba(0,0,0,0.9)',
               }}
             >
-              Start Game
+              Portfolio Mode
             </span>
             <MenuPointerRight active={hoveredItem === 0} />
+          </button>
+
+          {/* 1B. SURVIVAL MODE */}
+          <button
+            type="button"
+            data-testid="enter-survival-btn"
+            onMouseEnter={() => {
+              setHoveredItem(1);
+              sound.playTempleBell(440);
+            }}
+            onFocus={() => setHoveredItem(1)}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onStart('survival');
+            }}
+            className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
+          >
+            <MenuPointerLeft active={hoveredItem === 1} />
+            <span
+              className={`font-mythic text-lg sm:text-2xl tracking-[0.22em] uppercase transition-all duration-200 whitespace-nowrap ${
+                hoveredItem === 1
+                  ? 'text-[#f43f5e] scale-105'
+                  : 'text-[#fda4af]/70 hover:text-[#f43f5e]'
+              }`}
+              style={{
+                textShadow:
+                  hoveredItem === 1
+                    ? '0 0 20px rgba(244, 63, 94, 0.6), 0 4px 16px rgba(0,0,0,0.95)'
+                    : '0 4px 14px rgba(0,0,0,0.9)',
+              }}
+            >
+              Survival Mode
+            </span>
+            <MenuPointerRight active={hoveredItem === 1} />
           </button>
 
           {/* 2. HOW TO PLAY */}
@@ -419,17 +456,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             type="button"
             data-testid="tab-how-to-play"
             onMouseEnter={() => {
-              setHoveredItem(1);
+              setHoveredItem(2);
               sound.playTempleBell(440);
             }}
-            onFocus={() => setHoveredItem(1)}
+            onFocus={() => setHoveredItem(2)}
             onClick={() => setActiveModal(activeModal === 'howto' ? null : 'howto')}
             className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
           >
-            <MenuPointerLeft active={hoveredItem === 1 || activeModal === 'howto'} />
+            <MenuPointerLeft active={hoveredItem === 2 || activeModal === 'howto'} />
             <span
               className={`font-mythic text-sm sm:text-lg tracking-[0.22em] uppercase transition-all duration-200 whitespace-nowrap ${
-                hoveredItem === 1 || activeModal === 'howto'
+                hoveredItem === 2 || activeModal === 'howto'
                   ? 'text-white scale-105'
                   : 'text-[#e2e8f0]/75 hover:text-white'
               }`}
@@ -437,7 +474,33 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             >
               How To Play
             </span>
-            <MenuPointerRight active={hoveredItem === 1 || activeModal === 'howto'} />
+            <MenuPointerRight active={hoveredItem === 2 || activeModal === 'howto'} />
+          </button>
+
+          {/* 3. GLOBAL LEADERBOARD */}
+          <button
+            type="button"
+            data-testid="tab-leaderboard"
+            onMouseEnter={() => {
+              setHoveredItem(3);
+              sound.playTempleBell(528);
+            }}
+            onFocus={() => setHoveredItem(3)}
+            onClick={() => setActiveModal(activeModal === 'leaderboard' ? null : 'leaderboard')}
+            className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
+          >
+            <MenuPointerLeft active={hoveredItem === 3 || activeModal === 'leaderboard'} />
+            <span
+              className={`font-mythic text-sm sm:text-lg tracking-[0.22em] uppercase transition-all duration-200 whitespace-nowrap ${
+                hoveredItem === 3 || activeModal === 'leaderboard'
+                  ? 'text-[#fef08a] scale-105'
+                  : 'text-[#fef08a]/60 hover:text-[#fef08a]'
+              }`}
+              style={{ textShadow: '0 3px 14px rgba(0,0,0,0.92)' }}
+            >
+              Global Leaderboard
+            </span>
+            <MenuPointerRight active={hoveredItem === 3 || activeModal === 'leaderboard'} />
           </button>
 
           {/* 3. PROJECT SANCTUMS */}
@@ -445,17 +508,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             type="button"
             data-testid="tab-sanctums"
             onMouseEnter={() => {
-              setHoveredItem(2);
+              setHoveredItem(4);
               sound.playTempleBell(480);
             }}
-            onFocus={() => setHoveredItem(2)}
+            onFocus={() => setHoveredItem(4)}
             onClick={() => setActiveModal(activeModal === 'sanctums' ? null : 'sanctums')}
             className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
           >
-            <MenuPointerLeft active={hoveredItem === 2 || activeModal === 'sanctums'} />
+            <MenuPointerLeft active={hoveredItem === 4 || activeModal === 'sanctums'} />
             <span
               className={`font-mythic text-sm sm:text-lg tracking-[0.22em] uppercase transition-all duration-200 whitespace-nowrap ${
-                hoveredItem === 2 || activeModal === 'sanctums'
+                hoveredItem === 4 || activeModal === 'sanctums'
                   ? 'text-white scale-105'
                   : 'text-[#e2e8f0]/75 hover:text-white'
               }`}
@@ -463,25 +526,28 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             >
               Project Sanctums
             </span>
-            <MenuPointerRight active={hoveredItem === 2 || activeModal === 'sanctums'} />
+            <MenuPointerRight active={hoveredItem === 4 || activeModal === 'sanctums'} />
           </button>
 
-          {/* 4. CAREER CHRONICLE */}
+          {/* 5. CAREER CHRONICLE (Optional/Hidden for simplicity if needed, but let's keep it as item 5) */}
           <button
             type="button"
             data-testid="tab-saga"
             onMouseEnter={() => {
-              setHoveredItem(3);
+              // setHoveredItem(5); // Not enough space maybe? Let's just use 4 for now and see.
+              // Actually let's just make Career Chronicle part of Saga modal or similar.
+              // Or just add it as 5th.
+              setHoveredItem(5);
               sound.playTempleBell(396);
             }}
-            onFocus={() => setHoveredItem(3)}
+            onFocus={() => setHoveredItem(5)}
             onClick={() => setActiveModal(activeModal === 'saga' ? null : 'saga')}
             className="group flex items-center justify-center gap-4 px-4 py-1 cursor-pointer bg-transparent border-0 focus:outline-none"
           >
-            <MenuPointerLeft active={hoveredItem === 3 || activeModal === 'saga'} />
+            <MenuPointerLeft active={hoveredItem === 5 || activeModal === 'saga'} />
             <span
               className={`font-mythic text-sm sm:text-lg tracking-[0.22em] uppercase transition-all duration-200 whitespace-nowrap ${
-                hoveredItem === 3 || activeModal === 'saga'
+                hoveredItem === 5 || activeModal === 'saga'
                   ? 'text-white scale-105'
                   : 'text-[#e2e8f0]/75 hover:text-white'
               }`}
@@ -489,7 +555,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             >
               Career Chronicle
             </span>
-            <MenuPointerRight active={hoveredItem === 3 || activeModal === 'saga'} />
+            <MenuPointerRight active={hoveredItem === 5 || activeModal === 'saga'} />
           </button>
         </nav>
       </main>
@@ -693,6 +759,45 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </>
             )}
 
+            {activeModal === 'leaderboard' && (
+              <>
+                <div className="space-y-1">
+                  <h2 className="font-mythic text-xl sm:text-2xl tracking-[0.22em] uppercase text-[#fef08a]">
+                    Survival Mode Leaderboard
+                  </h2>
+                  <p className="font-sans text-xs text-[#94a3b8]">
+                    Top 10 warriors who survived the Corporate Asura waves
+                  </p>
+                </div>
+
+                <div className="h-px w-full bg-[#f8f5ee]/15" />
+
+                <div className="w-full max-w-md mx-auto space-y-2 py-4 max-h-[40vh] overflow-y-auto">
+                  {leaderboard.length > 0 ? (
+                    leaderboard.map((entry, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between px-4 py-2 bg-[#09101f] border border-[#d4af37]/20"
+                      >
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono text-sm text-[#d4af37] w-6">#{idx + 1}</span>
+                          <span className="font-display text-sm text-white font-bold">{entry.name}</span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="font-mono text-sm text-[#fef08a] tabular-nums">{entry.score} pts</span>
+                          <span className="font-mono text-[10px] text-[#94a3b8] uppercase">Wave {entry.wave}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-[#94a3b8] italic py-8">
+                      No scores recorded yet. Be the first to survive!
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             <div className="pt-2 flex items-center justify-center gap-8">
               <button
                 type="button"
@@ -705,11 +810,21 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setActiveModal(null);
-                  onStart();
+                  onStart('portfolio');
                 }}
                 className="font-mythic text-xs tracking-[0.24em] uppercase text-[#fde68a] hover:text-white cursor-pointer py-1 border-b border-[#fde68a]/60 hover:border-white transition-colors"
               >
-                Start Game [Enter]
+                Start Portfolio [Enter]
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveModal(null);
+                  onStart('survival');
+                }}
+                className="font-mythic text-xs tracking-[0.24em] uppercase text-[#f43f5e] hover:text-white cursor-pointer py-1 border-b border-[#f43f5e]/60 hover:border-white transition-colors"
+              >
+                Start Survival [Ctrl+Enter]
               </button>
             </div>
           </div>

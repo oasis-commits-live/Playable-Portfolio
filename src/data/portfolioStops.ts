@@ -164,15 +164,15 @@ export const STORY_CHAPTERS: StoryChapter[] = [
     title: 'Lead Product Designer at Cheggout & The September Layoff',
     era: 'May 2026 — Sept 2026',
     summary:
-      'Led org-wide brand design systems, internal multi-channel Ops reward platforms, and banking Mystery Box UX at Cheggout — before a sudden September restructuring layoff struck.',
+      "Led org-wide brand design systems and internal Ops reward engines at Cheggout — before a sudden restructuring layoff struck. This world is the answer: turning craft into weapons.",
     unlockCondition: 'Inspect all 6 Project Scrolls in the Valley to Unlock the Layoff Boss',
   },
   {
     act: 'ACT V',
-    title: 'Craft Prevails: Vanquishing The September Layoff',
+    title: 'Craft Prevails: Vanquishing the Corporate Restructuring',
     era: 'Present · Ready for the Next Chapter',
     summary:
-      'Armed with 6 shipped product powers and 4 years of cross-disciplinary mastery, confront and defeat the September Layoff Colossus in the Northern Citadel.',
+      'Armed with 6 shipped product powers and 4+ years of cross-disciplinary mastery, confront the September Layoff Colossus in the Northern Citadel.',
     unlockCondition: 'Defeat Maha-Asura: The September Layoff',
   },
 ];
@@ -255,9 +255,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Across a $12B+ mid-market finance automation landscape (50,000+ enterprises growing at 23% CAGR), CFOs suffer from severe context switching across 15+ disconnected tools. By benchmarking Notion, Perplexity, Genspark, and Grok alongside partner CFO consultants, I architected a high-trust financial workspace with zero hallucination ambiguity.',
     ],
     keyMetrics: [
-      { label: 'Target Market', value: '$12B+', context: '23% CAGR across 50,000+ mid-market finance teams' },
-      { label: 'Tool Consolidation', value: '15+ → 1', context: 'Unifies emails, ERP docs, forecasting & market news' },
-      { label: 'AI Paradigm', value: 'Digital Twin', context: 'Human-in-the-loop conversational finance companion' },
+      { label: 'Efficiency Gain', value: '15+ → 1', context: 'Consolidated fragmented tools into one command center' },
+      { label: 'Morning Ritual', value: '62%', context: 'Time reclaimed from triaging controller emails' },
+      { label: 'Market Potential', value: '$12B+', context: '50k+ mid-market enterprises growing at 23% CAGR' },
     ],
     unlockedPower: {
       id: 'power-vera',
@@ -443,9 +443,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Beyond nostalgia, Oasis validated a complete AI-native design-to-production engineering pipeline: crafting the tactile retro UI system in Figma, authoring rigorous physics & state-machine PRDs with ChatGPT and Perplexity, compiling interactive frontend code in Figma Make, and wiring a live Supabase backend with PostgreSQL leaderboards, Edge Functions, and retro chiptune storage buckets.',
     ],
     keyMetrics: [
-      { label: 'Week-1 Adoption', value: '100+ Players', context: 'Organic active users within the first 7 days of launch' },
-      { label: 'Session Lift', value: '+10 Mins', context: 'Average playtime increase after shipping Zen Stack' },
-      { label: 'Full-Stack AI', value: 'Figma → Supabase', context: 'Live auth, Edge Functions, leaderboards & audio buckets' },
+      { label: 'Week-1 Adoption', value: '100+', context: 'Organic active players within first 7 days' },
+      { label: 'Session Lift', value: '+10m', context: 'Average playtime increase after shipping Zen Stack' },
+      { label: 'Pipeline', value: 'AI-Native', context: 'Full-stack delivery via Figma Make & Supabase' },
     ],
     unlockedPower: {
       id: 'power-oasis',
@@ -631,9 +631,9 @@ export const PORTFOLIO_STOPS: PortfolioStop[] = [
       'Through hand-sketched character exploration synchronized with a company-wide brand mark redesign, I reimagined Hypo into a warm, expressive, geometrically harmonized companion across in-product AI Co-Pilots and social storytelling — propelling Hyperbots’ LinkedIn audience from 10,000 to 28,000 followers (+180%).',
     ],
     keyMetrics: [
-      { label: 'Community Surge', value: '10k → 28k', context: '+180% LinkedIn follower growth via mascot storytelling' },
-      { label: 'Mission Scale', value: '2,000+ Cos', context: 'Humanized AI adoption for mid-market finance teams' },
-      { label: 'Omnichannel', value: 'Product + Social', context: 'Unified across Co-Pilot UI states, video & events' },
+      { label: 'Community Surge', value: '+180%', context: 'LinkedIn audience grew from 10k to 28k followers' },
+      { label: 'Strategic Role', value: 'Humanizer', context: 'Turned robotic automation into helpful collaboration' },
+      { label: 'Impact', value: 'Omnichannel', context: 'Unified across SaaS UI, video, and social storytelling' },
     ],
     unlockedPower: {
       id: 'power-mascot',
@@ -966,6 +966,7 @@ export interface DemonSpawnConfig {
   maxHp: number;
   attackDamage: number;
   aggroRange: number;
+  territoryRadius: number;
   moveSpeed: number;
   scale: number;
   colorHex: number;
@@ -977,11 +978,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: "Sorry, We Won't Be Moving Forward",
     title: 'Automated ATS Rejection Wraith',
     archetype: 'vanguard',
-    position: { x: -7.5, z: -16.5 },
+    position: { x: -24.0, z: -25.0 },
     maxHp: 220,
     attackDamage: 14,
-    aggroRange: 24,
-    moveSpeed: 6.0,
+    aggroRange: 11.5,
+    territoryRadius: 14.5,
+    moveSpeed: 5.8,
     scale: 1.15,
     colorHex: 0xdc2626,
   },
@@ -990,11 +992,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: 'Performance Improvement Plan (PIP)',
     title: '30-Day Micromanagement Inquisitor',
     archetype: 'stalker',
-    position: { x: 18.5, z: -15.5 },
+    position: { x: 24.5, z: -24.5 },
     maxHp: 250,
     attackDamage: 15,
-    aggroRange: 24,
-    moveSpeed: 6.2,
+    aggroRange: 11.5,
+    territoryRadius: 14.5,
+    moveSpeed: 6.0,
     scale: 1.18,
     colorHex: 0xea580c,
   },
@@ -1003,11 +1006,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: 'Position Eliminated: Restructuring',
     title: 'Q3 Headcount Reduction Enforcer',
     archetype: 'berserker',
-    position: { x: 21.0, z: 10.5 },
+    position: { x: 26.5, z: 9.5 },
     maxHp: 280,
     attackDamage: 18,
-    aggroRange: 25,
-    moveSpeed: 6.1,
+    aggroRange: 12.0,
+    territoryRadius: 15.0,
+    moveSpeed: 5.9,
     scale: 1.22,
     colorHex: 0x9333ea,
   },
@@ -1016,11 +1020,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: 'Ghosted After 6 Interview Rounds',
     title: 'Unpaid Take-Home Assignment Fiend',
     archetype: 'vanguard',
-    position: { x: -21.0, z: 10.5 },
+    position: { x: -26.5, z: 9.5 },
     maxHp: 240,
     attackDamage: 15,
-    aggroRange: 24,
-    moveSpeed: 6.0,
+    aggroRange: 11.5,
+    territoryRadius: 14.5,
+    moveSpeed: 5.8,
     scale: 1.16,
     colorHex: 0xb91c1c,
   },
@@ -1029,11 +1034,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: 'Went With Another Candidate',
     title: 'No-Feedback Form-Letter Phantom',
     archetype: 'stalker',
-    position: { x: -19.5, z: -7.5 },
+    position: { x: -25.5, z: -6.5 },
     maxHp: 230,
     attackDamage: 14,
-    aggroRange: 24,
-    moveSpeed: 6.1,
+    aggroRange: 11.5,
+    territoryRadius: 14.5,
+    moveSpeed: 5.9,
     scale: 1.15,
     colorHex: 0xdb2777,
   },
@@ -1042,11 +1048,12 @@ export const INITIAL_DEMON_SPAWNS: DemonSpawnConfig[] = [
     name: 'Mandatory Return-to-Office Ultimatum',
     title: 'Hiring-Freeze & Scope-Creep Warden',
     archetype: 'berserker',
-    position: { x: -8.5, z: -10.5 },
+    position: { x: 25.5, z: -5.5 },
     maxHp: 260,
     attackDamage: 16,
-    aggroRange: 23,
-    moveSpeed: 6.0,
+    aggroRange: 11.5,
+    territoryRadius: 14.5,
+    moveSpeed: 5.8,
     scale: 1.2,
     colorHex: 0xdc2626,
   },
@@ -1057,6 +1064,31 @@ export const LAYOFF_BOSS_CONFIG = {
   name: 'THE SEPTEMBER LAYOFF — "YOUR ROLE HAS BEEN IMPACTED"',
   subtitle: 'Colossal Q3 Workforce Restructuring Sovereign · Call Down Indra Vajra Sky-Lightning [Key Z] to Shatter',
   spawnPosition: { x: 0, z: -48 },
+  challengeCirclePosition: { x: 0, z: -45.8 },
+  challengeCircleRadius: 4.8,
   maxHp: 1600,
   scale: 2.85,
 };
+
+export const RECRUITER_TEMPLE_CONFIG = {
+  id: 'sanctum-recruiter-temple',
+  name: 'Sankalpa Mandapa — Temple of Opportunities',
+  subtitle: 'Recruiter & Hiring Partner Sanctum · Send an Opportunity via Mail or Book a Direct Intro Call',
+  description:
+    'Step onto the golden altar to send an opportunity offer to Ayush via email, seal an Opportunity Scroll in the Temple Ledger, or book a 15-minute discovery call.',
+  position: { x: 0, z: 54 },
+  interactionRadius: 9.5,
+  accentColor: '#f59e0b',
+};
+
+export const HYPO_GUIDE_CONFIG = {
+  id: 'companion-hypo-guide',
+  name: 'Hypo — Portfolio Verse Companion Guide',
+  title: 'Friendly Portfolio Verse Companion',
+  subtitle: 'Interactive Friendly Guide · Ask How to Play, Fight Asuras, Unlock Lightning, or Reach Out',
+  greeting: 'Hi Builder! Ask me how to play, fight Asuras, unlock Lightning, or visit the Recruiter Temple!',
+  position: { x: 3.8, z: 5.4 },
+  interactionRadius: 4.8,
+  accentColor: '#2dd4bf',
+};
+

@@ -7,6 +7,7 @@ import {
   PortfolioStop,
   LOTUS_RELICS,
   FORGE_WEAPONS,
+  RECRUITER_TEMPLE_CONFIG,
   WeaponId,
   ForgeWeapon,
 } from '../data/portfolioStops';
@@ -84,6 +85,9 @@ export interface HudTelemetry {
   nearStop: PortfolioStop | null;
   nearDistance: number;
   nearWeaponForge?: ForgeWeapon | null;
+  nearRecruiterTemple?: boolean;
+  nearHypoGuide?: boolean;
+  nearBossChallengeCircle?: boolean;
   equippedWeaponId?: WeaponId;
   equippedWeaponName?: string;
   trackedTarget?: {
@@ -136,6 +140,12 @@ export interface HudTelemetry {
     title: string;
     stopId: string;
   } | null;
+  survivalWave?: number;
+  survivalScore?: number;
+  nextGuidanceSanctum?: {
+    title: string;
+    distance: number;
+  } | null;
 }
 
 interface HudOverlayProps {
@@ -170,6 +180,10 @@ interface HudOverlayProps {
   onResumeFromMastery: () => void;
   onVirtualMove: (forward: number, right: number) => void;
   onVirtualJump: () => void;
+  onOpenRecruiterTemple?: () => void;
+  onOpenHypoGuide?: () => void;
+  gameMode: 'portfolio' | 'survival';
+  onSaveScore?: (name: string, score: number, wave: number) => void;
 }
 
 export const HudOverlay: React.FC<HudOverlayProps> = ({
@@ -203,6 +217,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onResumeFromMastery,
   onVirtualMove,
   onVirtualJump,
+  onOpenRecruiterTemple,
+  onOpenHypoGuide,
+  gameMode,
+  onSaveScore,
 }) => {
   const [sanctumBarExpanded, setSanctumBarExpanded] = useState(() =>
     typeof window !== 'undefined' ? window.innerHeight >= 520 : true
@@ -416,92 +434,21 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               <div
                 key={m.id}
                 data-testid="boss-lock-hologram-badge"
-                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20 flex flex-col items-center animate-pulse"
-                style={{ left: `${m.xPct}%`, top: `${m.yPct}%` }}
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20 flex items-center gap-2 px-3 py-1 bg-[#04182b]/90 border border-[#38bdf8]/65 shadow-[0_4px_18px_rgba(0,0,0,0.75)] backdrop-blur-md"
+                style={{ left: '50%', top: '52px' }}
               >
-                <div className="px-3.5 py-2 bg-[#04182b]/95 border-2 border-[#38bdf8] shadow-[0_0_28px_rgba(56,189,248,0.65)] backdrop-blur-md text-center max-w-[310px]">
-                  <div className="font-mono text-[9px] font-bold tracking-[0.2em] uppercase text-[#38bdf8]">
-                    {m.subtitle}
-                  </div>
-                  <div className="font-hud text-xs sm:text-sm font-bold text-[#fef08a] tracking-wide mt-0.5">
-                    “{m.title}”
-                  </div>
-                </div>
-                <div className="w-2.5 h-2.5 rotate-45 bg-[#38bdf8] -mt-1 border border-[#04182b]" />
+                <span className="font-mono text-[9px] font-bold tracking-[0.18em] uppercase text-[#38bdf8]">
+                  {m.subtitle}
+                </span>
+                <span className="text-[#38bdf8]/40">·</span>
+                <span className="font-hud text-[11px] font-bold text-[#fef08a] tracking-wide">
+                  “{m.title}”
+                </span>
               </div>
             );
           }
 
-          const badgeMeta =
-            m.kind === 'project'
-              ? {
-                  tag: 'PROJECT SANCTUM',
-                  bg: 'bg-[#07111e]/90',
-                  border: 'border-[#d4af37]',
-                  tagColor: 'text-[#d4af37]',
-                  icon: '◆',
-                }
-              : m.kind === 'jewel'
-              ? {
-                  tag: 'CAREER JEWEL',
-                  bg: 'bg-[#170926]/90',
-                  border: 'border-[#c084fc]',
-                  tagColor: 'text-[#e879f9]',
-                  icon: '❖',
-                }
-              : {
-                  tag: 'WEAPON FORGE',
-                  bg: 'bg-[#1a1005]/90',
-                  border: 'border-[#38bdf8]',
-                  tagColor: 'text-[#38bdf8]',
-                  icon: '⚔',
-                };
-
-          return (
-            <div
-              key={m.id}
-              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-10 transition-all duration-75"
-              style={{ left: `${m.xPct}%`, top: `${m.yPct}%` }}
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  if (m.kind === 'project') {
-                    onTeleportToStop(m.id);
-                  } else if (m.kind === 'weapon' && onEquipWeapon) {
-                    onEquipWeapon(m.id as WeaponId);
-                    onSelectGuidanceTarget?.(m.id, 'weapon');
-                  } else if (m.kind === 'jewel') {
-                    onSelectGuidanceTarget?.(m.id, 'jewel');
-                  }
-                }}
-                className={`group flex flex-col items-center cursor-pointer`}
-              >
-                <div
-                  className={`px-2 py-0.5 lg:px-2.5 lg:py-1 ${badgeMeta.bg} border-l-2 ${badgeMeta.border} backdrop-blur-md shadow-[0_6px_20px_rgba(0,0,0,0.85)] group-hover:scale-105 transition-transform text-left max-w-[175px] lg:max-w-none`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`font-mono text-[8px] font-bold tracking-[0.16em] uppercase ${badgeMeta.tagColor}`}
-                    >
-                      {badgeMeta.icon} {badgeMeta.tag}
-                    </span>
-                    <span className="font-mono text-[9px] text-[#fef08a] tabular-nums">
-                      {m.distance}m
-                    </span>
-                  </div>
-                  <div className="font-hud text-[10px] lg:text-[11px] font-bold text-[#f8f5ee] tracking-wide truncate">
-                    {m.title}
-                  </div>
-                  <div className="hidden lg:block font-mono text-[8px] text-[#94a3b8] uppercase tracking-wider">
-                    {m.subtitle}
-                  </div>
-                </div>
-                <div className="w-2 h-2 rotate-45 bg-[#d4af37] -mt-1 border border-[#05070b]" />
-              </button>
-            </div>
-          );
+          return null;
         })}
 
       {/* 0B. FLOATING SCREEN-SPACE COMBAT DAMAGE, DODGE & SEKIRO DEFLECT POPUPS */}
@@ -537,264 +484,173 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
         ))}
 
-      {/* 1. TOP-LEFT UNIFIED PORTFOLIO VERSE NAVIGATOR (PROJECTS · JEWELS · WEAPONS) */}
-      <div className="absolute top-3 left-4 lg:top-5 lg:left-6 flex flex-col gap-1.5 lg:gap-2 pointer-events-auto max-w-[310px] lg:max-w-[460px]">
-        {/* Active Tale / Act Header with Left Golden Vertical Blade */}
-        <div className="flex items-center gap-3 pl-2.5 lg:pl-3 border-l-2 border-[#d4af37]">
-          <div>
-            <div className="flex flex-wrap items-center gap-1.5 lg:gap-2 font-hud text-[10px] lg:text-[11px] font-bold tracking-[0.16em] lg:tracking-[0.2em] uppercase text-[#d4af37]">
-              <span>PORTFOLIO VERSE</span>
-              <span>·</span>
-              <span className="text-[#2dd4bf]">{stats.visitedStopsCount}/6 PROJECTS</span>
-              <span>·</span>
-              <span className="text-[#e879f9]">{stats.collectedRelicsCount}/5 JEWELS</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 mt-0.5">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setStoryDrawerOpen((prev) => !prev);
-                }}
-                className="font-mythic italic text-sm lg:text-lg text-[#f8f5ee] hover:text-[#d4af37] transition-colors cursor-pointer leading-none"
-                title="Open 5-Act Saga & September Layoff Chronicle [Key L]"
-              >
-                {telemetry.storyTitle || 'The Builder’s Awakening'}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setStoryDrawerOpen((prev) => !prev);
-                }}
-                className="font-mono text-[9px] text-[#94a3b8] hover:text-[#d4af37] cursor-pointer"
-              >
-                [L · SAGA]
-              </button>
-              {!telemetry.bossDefeated && (
-                <button
-                  type="button"
-                  data-testid="summon-boss-btn"
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    onSummonLayoffBoss();
-                  }}
-                  className={`px-2 py-0.5 clip-blade-right border-l-2 font-hud text-[9px] lg:text-[10px] font-bold tracking-[0.14em] uppercase transition-all cursor-pointer ${
-                    visitedStopIds.size >= 6
-                      ? 'bg-[#881337]/90 hover:bg-[#be123c] border-[#fda4af] text-[#ffe4e6]'
-                      : 'bg-[#081b2e]/90 hover:bg-[#0e2a47] border-[#38bdf8] text-[#bae6fd]'
-                  }`}
-                  title={
-                    visitedStopIds.size >= 6
-                      ? 'Challenge the September Layoff Boss [Key B]'
-                      : `Unlock fight after seeing all the projects (${visitedStopIds.size}/6 seen) [Key B]`
-                  }
-                >
-                  {telemetry.bossAwakened
-                    ? '⚔ Boss Active [B]'
-                    : visitedStopIds.size >= 6
-                    ? '⚔ Challenge Boss [B]'
-                    : `🔒 Boss (${visitedStopIds.size}/6) [B]`}
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid="open-summary-scroll-btn"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setSummaryScrollOpen(true);
-                }}
-                className="px-2 py-0.5 clip-blade-right bg-[#0c1d2c]/90 hover:bg-[#16344d] border-l-2 border-[#2dd4bf] font-hud text-[9px] lg:text-[10px] font-bold tracking-[0.14em] uppercase text-[#ccfbf1] transition-all cursor-pointer"
-                title="Open World Exploration & Unseen Relics Summary Scroll"
-              >
-                📜 Summary Scroll
-              </button>
-            </div>
+      {/* 1. TOP-LEFT SIMPLIFIED EXPLORER HEADER */}
+      <div className="absolute top-4 left-5 lg:top-8 lg:left-8 flex flex-col pointer-events-auto max-w-[310px] lg:max-w-[460px]">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2 text-[10px] font-hud font-bold tracking-[0.25em] uppercase text-[#d4af37]/80">
+            <span>{gameMode === 'survival' ? 'SURVIVAL MODE' : 'PORTFOLIO VERSE'}</span>
+            <span className="text-[#d4af37]/30">·</span>
+            <button
+              type="button"
+              onClick={() => setSanctumBarExpanded(!sanctumBarExpanded)}
+              className="hover:text-white transition-colors cursor-pointer text-[#d4af37]/60"
+            >
+              {sanctumBarExpanded ? 'HIDE LOG' : 'SHOW LOG'}
+            </button>
           </div>
+
+          {gameMode === 'survival' ? (
+            <div className="flex items-baseline gap-4 mt-1 font-mythic text-xl text-white">
+              <span className="text-[#f43f5e] drop-shadow-sm">WAVE {telemetry.survivalWave ?? 1}</span>
+              <span className="text-[#fef08a] text-lg tabular-nums">{telemetry.survivalScore ?? 0} PTS</span>
+            </div>
+          ) : (
+            <div className="flex flex-col mt-0.5">
+              <h1 className="font-mythic italic text-lg lg:text-2xl text-[#f8f5ee] leading-tight drop-shadow-md">
+                {telemetry.storyTitle || 'The Builder’s Awakening'}
+              </h1>
+              {telemetry.nextGuidanceSanctum && !activeStopId && (
+                <div className="flex items-center gap-1.5 mt-1 text-[9px] font-mono text-[#2dd4bf] tracking-widest animate-pulse">
+                  <span className="opacity-70">GUIDANCE →</span>
+                  <span className="font-bold uppercase">{telemetry.nextGuidanceSanctum.title}</span>
+                  <span className="opacity-60">· {telemetry.nextGuidanceSanctum.distance}M</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Category Switcher Tabs: PROJECTS (6) | JEWELS (5) | WEAPONS (4) */}
-        {sanctumBarExpanded ? (
-          <div className="pl-3 space-y-1.5">
-            <div className="flex items-center gap-1">
+        {/* Unified Explorer Log (Minimalist Drawer) */}
+        {sanctumBarExpanded && (
+          <div className="mt-2 space-y-4 animate-fade-in">
+            {/* Quick Actions Grid (Unboxed) */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px] font-hud font-bold uppercase tracking-widest text-[#d4af37]/60">
               <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setNavCategory('projects');
-                }}
-                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
-                  navCategory === 'projects'
-                    ? 'bg-[#d4af37] text-[#05070b]'
-                    : 'bg-[#070b14]/85 text-[#cbd5e1] border border-[#d4af37]/30 hover:text-white'
-                }`}
+                onClick={() => { setStoryDrawerOpen(!storyDrawerOpen); setSummaryScrollOpen(false); }}
+                className="text-left hover:text-[#f8f5ee] transition-colors cursor-pointer"
               >
-                ◆ Projects ({stats.visitedStopsCount}/6)
+                Saga Chronicle [L]
               </button>
               <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setNavCategory('jewels');
-                }}
-                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
-                  navCategory === 'jewels'
-                    ? 'bg-[#c084fc] text-[#05070b]'
-                    : 'bg-[#070b14]/85 text-[#e9d5ff] border border-[#c084fc]/30 hover:text-white'
-                }`}
+                onClick={() => { setSummaryScrollOpen(!summaryScrollOpen); setStoryDrawerOpen(false); }}
+                className="text-left hover:text-[#f8f5ee] transition-colors cursor-pointer"
               >
-                ❖ Jewels ({stats.collectedRelicsCount}/5)
+                World Summary
               </button>
               <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setNavCategory('weapons');
-                }}
-                className={`px-2.5 py-0.5 font-hud text-[10px] font-bold tracking-[0.18em] uppercase cursor-pointer transition-colors ${
-                  navCategory === 'weapons'
-                    ? 'bg-[#38bdf8] text-[#05070b]'
-                    : 'bg-[#070b14]/85 text-[#bae6fd] border border-[#38bdf8]/30 hover:text-white'
-                }`}
+                onClick={onOpenHypoGuide}
+                className="text-left hover:text-[#2dd4bf] transition-colors cursor-pointer text-[#2dd4bf]/70"
               >
-                ⚔ Weapons (4)
+                Hypo AI Guide
               </button>
               <button
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setSanctumBarExpanded(false);
+                onClick={() => {
+                  onTeleportToPoint?.(RECRUITER_TEMPLE_CONFIG.position.x, RECRUITER_TEMPLE_CONFIG.position.z - 6.2, 'Temple of Opportunities');
+                  onOpenRecruiterTemple?.();
                 }}
-                className="px-1.5 py-0.5 font-mono text-[9px] text-[#94a3b8] hover:text-white cursor-pointer"
-                title="Toggle Navigator [Tab / H]"
+                className="text-left hover:text-[#fef08a] transition-colors cursor-pointer text-[#fef08a]/70"
               >
-                [HIDE]
+                Recruiter Temple
               </button>
             </div>
 
-            {/* Category 1: 6 Shipped Project Sanctums */}
-            {navCategory === 'projects' && (
-              <div className="flex flex-wrap items-center gap-1">
-                {PORTFOLIO_STOPS.map((stop) => {
-                  const isVisited = visitedStopIds.has(stop.id);
-                  const isCurrent =
-                    activeStopId === stop.id ||
-                    telemetry.nearStop?.id === stop.id ||
-                    telemetry.trackedTarget?.id === stop.id;
-                  return (
-                    <button
-                      key={stop.id}
-                      type="button"
-                      data-testid={`hud-project-btn-${stop.id}`}
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        onSelectGuidanceTarget?.(stop.id, 'project');
-                        onTeleportToStop(stop.id);
-                      }}
-                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
-                        isCurrent
-                          ? 'bg-[#d4af37] text-[#05070b] border-[#fef08a] font-bold'
-                          : isVisited
-                          ? 'bg-[#091820]/85 text-[#2dd4bf] border-[#2dd4bf] hover:bg-[#112836]'
-                          : 'bg-[#070b14]/75 text-[#cbd5e1] border-[#d4af37]/40 hover:text-white hover:border-[#d4af37]'
-                      }`}
-                      title={`Track & Teleport to Project Sanctum: ${stop.title}`}
-                    >
-                      {SHORT_STOP_LABELS[stop.id]}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Category 2: 5 Career Experience Lotus Jewels */}
-            {navCategory === 'jewels' && (
-              <div className="flex flex-wrap items-center gap-1">
-                {LOTUS_RELICS.map((relic, idx) => {
-                  const isCollected = collectedRelicIds.has(relic.id);
-                  const isTracked = telemetry.trackedTarget?.id === relic.id;
-                  return (
-                    <button
-                      key={relic.id}
-                      type="button"
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        onSelectGuidanceTarget?.(relic.id, 'jewel');
-                        onTeleportToPoint?.(
-                          relic.position.x,
-                          relic.position.z + 1.8,
-                          `JEWEL · ${relic.company}`
-                        );
-                      }}
-                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
-                        isTracked
-                          ? 'bg-[#c084fc] text-[#05070b] border-white font-bold'
-                          : isCollected
-                          ? 'bg-[#190d26]/85 text-[#e879f9] border-[#c084fc] hover:bg-[#2a1440]'
-                          : 'bg-[#070b14]/80 text-[#cbd5e1] border-[#c084fc]/45 hover:text-white'
-                      }`}
-                      title={`${relic.name} (${relic.era}) — Click to Track & Teleport`}
-                    >
-                      J0{idx + 1} · {relic.company.split(' ')[0]} {isCollected ? '✓' : ''}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Category 3: 4 Divine Weapons & Armory Forges */}
-            {navCategory === 'weapons' && (
-              <div className="flex flex-wrap items-center gap-1">
-                {FORGE_WEAPONS.map((w, idx) => {
-                  const isEquipped = equippedWeaponId === w.id;
-                  return (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        onEquipWeapon?.(w.id);
-                        onSelectGuidanceTarget?.(w.id, 'weapon');
-                      }}
-                      className={`px-2 py-0.5 clip-blade-right font-hud text-[11px] font-semibold tracking-wider uppercase transition-all cursor-pointer border-l ${
-                        isEquipped
-                          ? 'bg-[#38bdf8] text-[#05070b] border-white font-bold'
-                          : 'bg-[#070b14]/80 text-[#bae6fd] border-[#38bdf8]/45 hover:text-white'
-                      }`}
-                      title={`[${idx + 1}] Equip ${w.name} (+${w.baseDamageBonus} ATK · ${w.category})`}
-                    >
-                      [{idx + 1}] {w.name.split(' ')[0]} {isEquipped ? '★' : `+${w.baseDamageBonus}`}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Active 3D Guidance Trail Indicator */}
-            {telemetry.trackedTarget && (
-              <div className="flex items-center gap-2 text-[10px] font-mono text-[#fef08a] bg-[#060a14]/80 px-2 py-0.5 border-l border-[#d4af37]">
-                <span>GOLDEN TRAIL →</span>
-                <span className="font-bold text-white">{telemetry.trackedTarget.title}</span>
-                <span className="text-[#2dd4bf]">({telemetry.trackedTarget.distance}m)</span>
-              </div>
-            )}
+            {/* Category Navigation (Zero-Pill) */}
+            <div className="flex items-center gap-4 text-[9px] font-hud font-bold tracking-[0.2em] uppercase border-b border-white/5 pb-1">
+              <button onClick={() => setNavCategory('projects')} className={`transition-colors cursor-pointer ${navCategory === 'projects' ? 'text-[#d4af37]' : 'text-[#94a3b8] hover:text-white'}`}>Projects</button>
+              <button onClick={() => setNavCategory('jewels')} className={`transition-colors cursor-pointer ${navCategory === 'jewels' ? 'text-[#c084fc]' : 'text-[#94a3b8] hover:text-white'}`}>Jewels</button>
+              <button onClick={() => setNavCategory('weapons')} className={`transition-colors cursor-pointer ${navCategory === 'weapons' ? 'text-[#38bdf8]' : 'text-[#94a3b8] hover:text-white'}`}>Weapons</button>
+            </div>
+            
+            {/* List Content */}
+            <div className="max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar space-y-1">
+              {navCategory === 'projects' && (
+                <div className="flex flex-col gap-1.5">
+                  {PORTFOLIO_STOPS.map(stop => {
+                    const visited = visitedStopIds.has(stop.id);
+                    return (
+                      <button 
+                        key={stop.id} 
+                        onClick={() => { onSelectGuidanceTarget?.(stop.id, 'project'); onTeleportToStop(stop.id); }} 
+                        className="group flex items-center justify-between gap-4 text-left cursor-pointer"
+                      >
+                        <span className={`text-[10px] font-medium uppercase tracking-tight transition-colors ${visited ? 'text-[#2dd4bf]' : 'text-[#94a3b8] group-hover:text-white'}`}>
+                          {SHORT_STOP_LABELS[stop.id]}
+                        </span>
+                        {visited && <span className="text-[8px] text-[#2dd4bf]/40">VISITED</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {navCategory === 'jewels' && (
+                <div className="flex flex-col gap-1.5">
+                  {LOTUS_RELICS.map((relic, idx) => {
+                    const collected = collectedRelicIds.has(relic.id);
+                    return (
+                      <button 
+                        key={relic.id} 
+                        onClick={() => { onSelectGuidanceTarget?.(relic.id, 'jewel'); onTeleportToPoint?.(relic.position.x, relic.position.z + 1.8, `JEWEL · ${relic.company}`); }} 
+                        className="group flex items-center justify-between gap-4 text-left cursor-pointer"
+                      >
+                        <span className={`text-[10px] font-medium uppercase tracking-tight transition-colors ${collected ? 'text-[#e879f9]' : 'text-[#94a3b8] group-hover:text-white'}`}>
+                          {idx + 1}. {relic.company.split(' ')[0]}
+                        </span>
+                        {collected && <span className="text-[8px] text-[#e879f9]/40">SEALED</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {navCategory === 'weapons' && (
+                <div className="flex flex-col gap-1.5">
+                  {FORGE_WEAPONS.map((w, idx) => {
+                    const equipped = telemetry.equippedWeaponId === w.id;
+                    return (
+                      <button 
+                        key={w.id} 
+                        onClick={() => onEquipWeapon?.(w.id)} 
+                        className="group flex items-center justify-between gap-4 text-left cursor-pointer"
+                      >
+                        <span className={`text-[10px] font-medium uppercase tracking-tight transition-colors ${equipped ? 'text-[#38bdf8]' : 'text-[#94a3b8] group-hover:text-white'}`}>
+                          [{idx + 1}] {w.name.split(' ')[0]}
+                        </span>
+                        {equipped && <span className="text-[8px] text-[#38bdf8]/40">EQUIPPED</span>}
+                      </button>
+            </div>
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              setSanctumBarExpanded(true);
-            }}
-            className="pl-2.5 lg:pl-3 font-hud text-[9px] lg:text-[11px] tracking-[0.16em] uppercase text-[#94a3b8] hover:text-[#d4af37] text-left cursor-pointer"
+        )}
+
+        {/* UNLOCKED BOSS CHALLENGE CIRCLE AFFORDANCE BANNER (When all 6 projects are viewed & Boss not yet challenged!) */}
+        {visitedStopIds.size >= 6 && !telemetry.bossAwakened && !telemetry.bossDefeated && (
+          <div
+            data-testid="boss-circle-unlocked-banner"
+            className="mt-4 p-2 bg-gradient-to-r from-[#2e0714]/95 via-[#17091c]/95 to-[#091929]/95 border-l-2 border-[#f43f5e] shadow-[0_8px_24px_rgba(244,63,94,0.35)] flex items-center justify-between gap-2"
           >
-            + NAVIGATOR [TAB]
-          </button>
+            <div className="min-w-0">
+              <div className="font-hud text-[10px] font-bold uppercase tracking-wider text-[#fef08a]">
+                ⚔ ALL 6 PROJECTS VIEWED — BOSS CHALLENGE CIRCLE UNLOCKED!
+              </div>
+              <div className="font-mono text-[9px] text-[#fda4af] truncate">
+                Go to the Northern Challenge Circle &amp; press [E] or [B] to challenge the Layoff Boss!
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="challenge-boss-circle-btn"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onSummonLayoffBoss();
+              }}
+              className="px-2.5 py-1 clip-blade-right bg-[#e11d48] hover:bg-[#f43f5e] text-white font-hud text-[9px] font-extrabold uppercase tracking-wider cursor-pointer shrink-0 animate-pulse"
+            >
+              Enter Circle &amp; Fight →
+            </button>
+          </div>
         )}
 
         {/* On-Demand Expandable 5-Act Story Drawer */}
         {storyDrawerOpen && (
-          <div className="mt-1 p-4 bg-[#060a12]/94 border-l-2 border-[#d4af37] backdrop-blur-xl text-[#f4efe6] space-y-2.5 max-w-[350px] max-h-[48vh] overflow-y-auto shadow-2xl">
+          <div className="mt-4 p-4 bg-[#060a12]/94 border-l-2 border-[#d4af37] backdrop-blur-xl text-[#f4efe6] space-y-2.5 max-w-[350px] max-h-[48vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#d4af37]/20 pb-1.5">
               <span className="font-hud text-xs font-bold uppercase tracking-[0.2em] text-[#d4af37]">
                 5-Act Career &amp; Sept Layoff Saga
@@ -1158,8 +1014,12 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 fill="none"
                 opacity="0.6"
               />
-              {/* Boss Citadel */}
+              {/* Northern Boss Citadel */}
               <circle cx="0" cy="-48" r="4.2" fill="#f43f5e" />
+              {/* Southern Recruiter Opportunity Temple */}
+              <polygon points="0,49 4.8,54 0,59 -4.8,54" fill="#fef08a" stroke="#2dd4bf" strokeWidth="1" />
+              {/* Hypo Companion Guide at Spawn */}
+              <circle cx="3.8" cy="5.4" r="2.6" fill="#2dd4bf" />
 
               {/* 6 Project Sanctums (Diamonds) */}
               {PORTFOLIO_STOPS.map((s) => {
@@ -1243,39 +1103,92 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         </div>
       )}
 
-      {/* Proximity Sanctum Scroll OR Weapon Forge Interaction Callout */}
-      {!activeStopId && gameState === 'playing' && (telemetry.nearStop || telemetry.nearWeaponForge) && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto flex flex-col items-center gap-1.5 z-20">
-          {telemetry.nearStop && (
-            <button
-              type="button"
-              onClick={() => onInspectStop(telemetry.nearStop!.id)}
-              className="flex items-center gap-2.5 px-4 py-1.5 clip-blade-right bg-[#070b14]/95 border-l-2 border-[#d4af37] hover:bg-[#101829] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
-            >
-              <span className="px-2 py-0.5 bg-[#d4af37] text-[#05070b] font-hud font-bold text-[11px] tracking-wider uppercase">
-                [E] INSPECT PROJECT CODEX
-              </span>
-              <span className="font-mythic italic text-sm sm:text-base text-[#f8f5ee]">
-                {telemetry.nearStop.title}
-              </span>
-            </button>
-          )}
-          {telemetry.nearWeaponForge && (
-            <button
-              type="button"
-              onClick={() => onEquipWeapon?.(telemetry.nearWeaponForge!.id)}
-              className="flex items-center gap-2.5 px-4 py-1.5 clip-blade-right bg-[#091524]/95 border-l-2 border-[#38bdf8] hover:bg-[#12253d] text-left shadow-2xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
-            >
-              <span className="px-2 py-0.5 bg-[#38bdf8] text-[#05070b] font-hud font-bold text-[11px] tracking-wider uppercase">
-                [E] EQUIP DIVINE WEAPON
-              </span>
-              <span className="font-hud text-xs sm:text-sm font-bold text-[#e0f2fe]">
-                {telemetry.nearWeaponForge.name} (+{telemetry.nearWeaponForge.baseDamageBonus} ATK)
-              </span>
-            </button>
-          )}
-        </div>
-      )}
+      {/* Compact Peripheral Proximity Action Pill (Docked neatly just above the bottom vitals bar — zero center-screen obstruction) */}
+      {!activeStopId &&
+        gameState === 'playing' &&
+        (telemetry.nearStop ||
+          telemetry.nearWeaponForge ||
+          telemetry.nearHypoGuide ||
+          telemetry.nearRecruiterTemple ||
+          telemetry.nearBossChallengeCircle) && (
+          <div className="fixed bottom-[66px] left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-2 z-20">
+            {telemetry.nearBossChallengeCircle && (
+              <button
+                type="button"
+                data-testid="proximity-boss-circle-btn"
+                onClick={() => onSummonLayoffBoss()}
+                className="flex items-center gap-2 px-3.5 py-1 bg-[#1e050f]/92 border border-[#f43f5e]/70 hover:bg-[#33081a] text-left shadow-xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <span className="px-1.5 py-0.5 bg-[#f43f5e] text-white font-mono font-bold text-[10px] tracking-wider uppercase">
+                  {visitedStopIds.size >= 6 ? '[E / B]' : `🔒 ${visitedStopIds.size}/6`}
+                </span>
+                <span className="font-hud text-xs font-bold text-[#fef08a]">
+                  {visitedStopIds.size >= 6
+                    ? 'Challenge The September Layoff Boss'
+                    : 'Unlock fight after seeing all the projects'}
+                </span>
+              </button>
+            )}
+            {telemetry.nearHypoGuide && (
+              <button
+                type="button"
+                data-testid="proximity-hypo-guide-btn"
+                onClick={() => onOpenHypoGuide?.()}
+                className="flex items-center gap-2 px-3.5 py-1 bg-[#051a20]/92 border border-[#2dd4bf]/65 hover:bg-[#092b35] text-left shadow-xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <span className="px-1.5 py-0.5 bg-[#2dd4bf] text-[#041017] font-mono font-bold text-[10px] tracking-wider uppercase">
+                  [E]
+                </span>
+                <span className="font-hud text-xs font-bold text-[#fef08a]">
+                  Chat with Hypo AI Companion
+                </span>
+              </button>
+            )}
+            {telemetry.nearRecruiterTemple && (
+              <button
+                type="button"
+                data-testid="proximity-recruiter-temple-btn"
+                onClick={() => onOpenRecruiterTemple?.()}
+                className="flex items-center gap-2 px-3.5 py-1 bg-[#161004]/92 border border-[#d4af37]/70 hover:bg-[#261c07] text-left shadow-xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <span className="px-1.5 py-0.5 bg-[#d4af37] text-[#05070b] font-mono font-bold text-[10px] tracking-wider uppercase">
+                  [E]
+                </span>
+                <span className="font-hud text-xs font-bold text-[#fef08a]">
+                  Enter Temple of Opportunities (Offer Role / Mail)
+                </span>
+              </button>
+            )}
+            {telemetry.nearStop && (
+              <button
+                type="button"
+                onClick={() => onInspectStop(telemetry.nearStop!.id)}
+                className="flex items-center gap-2 px-3.5 py-1 bg-[#070b14]/92 border border-[#d4af37]/70 hover:bg-[#101829] text-left shadow-xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <span className="px-1.5 py-0.5 bg-[#d4af37] text-[#05070b] font-mono font-bold text-[10px] tracking-wider uppercase">
+                  [E]
+                </span>
+                <span className="font-hud text-xs font-bold text-[#f8f5ee]">
+                  Inspect Sanctum · {telemetry.nearStop.title}
+                </span>
+              </button>
+            )}
+            {telemetry.nearWeaponForge && (
+              <button
+                type="button"
+                onClick={() => onEquipWeapon?.(telemetry.nearWeaponForge!.id)}
+                className="flex items-center gap-2 px-3.5 py-1 bg-[#081322]/92 border border-[#38bdf8]/70 hover:bg-[#10223b] text-left shadow-xl transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+              >
+                <span className="px-1.5 py-0.5 bg-[#38bdf8] text-[#05070b] font-mono font-bold text-[10px] tracking-wider uppercase">
+                  [E]
+                </span>
+                <span className="font-hud text-xs font-bold text-[#e0f2fe]">
+                  Equip {telemetry.nearWeaponForge.name} (+{telemetry.nearWeaponForge.baseDamageBonus} ATK)
+                </span>
+              </button>
+            )}
+          </div>
+        )}
 
       {/* 5. BOTTOM-CENTER AAA HERO VITALS, SUDARSHANA MEDALLION & EQUIPPED WEAPON BAR */}
       {gameState === 'playing' && !activeStopId && (
@@ -1438,38 +1351,40 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           </div>
 
           {/* Unlockable Super Power: INDRA VAJRA SKY-LIGHTNING BOLT [Key Z] */}
-          <button
-            type="button"
-            data-testid="hud-lightning-bolt-btn"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              onTriggerLightningBolt?.();
-            }}
-            className={`mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1.5 font-hud text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all border ${
-              visitedStopIds.size >= 6
-                ? 'bg-gradient-to-r from-[#0284c7] via-[#38bdf8] to-[#fef08a] text-[#05070b] border-white shadow-[0_0_16px_rgba(56,189,248,0.85)] animate-pulse'
-                : 'bg-[#071120]/90 text-[#7dd3fc] border-[#38bdf8]/40 hover:border-[#38bdf8]'
-            }`}
-            title={
-              visitedStopIds.size >= 6
-                ? 'Strike Sky-Lightning Bolt from above to crush the Layoff Monster [Key Z]'
-                : `Inspect all 6 Project Sanctums (${visitedStopIds.size}/6) to unlock the Sky-Lightning Bolt Super Power [Key Z]`
-            }
-          >
-            <span className="flex items-center gap-1.5 truncate">
-              <span className="px-1 py-0.2 bg-[#05070b] text-[#fef08a] font-mono text-[9px] font-bold">
-                [Z]
+          {gameMode === 'portfolio' && (
+            <button
+              type="button"
+              data-testid="hud-lightning-bolt-btn"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onTriggerLightningBolt?.();
+              }}
+              className={`mt-0.5 w-full flex items-center justify-between gap-1.5 px-2 py-1.5 font-hud text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all border ${
+                visitedStopIds.size >= 6
+                  ? 'bg-gradient-to-r from-[#0284c7] via-[#38bdf8] to-[#fef08a] text-[#05070b] border-white shadow-[0_0_16px_rgba(56,189,248,0.85)] animate-pulse'
+                  : 'bg-[#071120]/90 text-[#7dd3fc] border-[#38bdf8]/40 hover:border-[#38bdf8]'
+              }`}
+              title={
+                visitedStopIds.size >= 6
+                  ? 'Strike Sky-Lightning Bolt from above to crush the Layoff Monster [Key Z]'
+                  : `Inspect all 6 Project Sanctums (${visitedStopIds.size}/6) to unlock the Sky-Lightning Bolt Super Power [Key Z]`
+              }
+            >
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="px-1 py-0.2 bg-[#05070b] text-[#fef08a] font-mono text-[9px] font-bold">
+                  [Z]
+                </span>
+                <span className="truncate">
+                  {visitedStopIds.size >= 6
+                    ? '⚡ SKY-LIGHTNING'
+                    : `🔒 LIGHTNING (${visitedStopIds.size}/6)`}
+                </span>
               </span>
-              <span className="truncate">
-                {visitedStopIds.size >= 6
-                  ? '⚡ SKY-LIGHTNING'
-                  : `🔒 LIGHTNING (${visitedStopIds.size}/6)`}
+              <span className="font-mono text-[8px]">
+                {visitedStopIds.size >= 6 ? 'READY' : 'LOCKED'}
               </span>
-            </span>
-            <span className="font-mono text-[8px]">
-              {visitedStopIds.size >= 6 ? 'READY' : 'LOCKED'}
-            </span>
-          </button>
+            </button>
+          )}
         </aside>
       )}
 
@@ -1611,11 +1526,48 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               and use <strong className="text-[#2dd4bf]">[RMB / V] Sekiro Deflect</strong> to shatter enemy posture!
             </p>
 
-            <div className="p-3 bg-[#190810] border border-[#f43f5e]/30 text-left font-mono text-[11px] text-[#fda4af] space-y-1">
-              <div>• Projects Awakened before fall: {visitedStopIds.size} / 6</div>
-              <div>• Career Jewels Collected before fall: {collectedRelicIds.size} / 5</div>
-              <div>• Corporate Asuras Vanquished: {6 - aliveDemons} / 6</div>
-            </div>
+            {gameMode === 'survival' ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="text-[10px] font-mono text-[#94a3b8] uppercase tracking-widest">Final Performance</div>
+                  <div className="font-mythic text-4xl text-[#fef08a]">{telemetry.survivalScore ?? 0} PTS</div>
+                  <div className="text-sm font-hud font-bold text-[#f43f5e] uppercase tracking-widest">Wave {telemetry.survivalWave ?? 1} Survived</div>
+                </div>
+
+                {!scoreSubmitted ? (
+                  <div className="max-w-xs mx-auto space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Enter Your Legend's Name"
+                      value={playerName}
+                      onChange={(e) => setPlayerName(e.target.value.slice(0, 20))}
+                      className="w-full px-3 py-2 bg-[#1a0810] border border-[#f43f5e]/50 text-white font-hud text-sm text-center focus:border-[#f43f5e] outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={!playerName.trim()}
+                      onClick={() => {
+                        onSaveScore?.(playerName, telemetry.survivalScore ?? 0, telemetry.survivalWave ?? 1);
+                        setScoreSubmitted(true);
+                      }}
+                      className="w-full py-2 bg-[#f43f5e] hover:bg-[#e11d48] disabled:opacity-50 text-white font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+                    >
+                      Submit to Global Leaderboard
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[#2dd4bf] font-hud text-sm font-bold animate-pulse">
+                    ✓ Score Transmitted to the Heavens
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-3 bg-[#190810] border border-[#f43f5e]/30 text-left font-mono text-[11px] text-[#fda4af] space-y-1">
+                <div>• Projects Awakened before fall: {visitedStopIds.size} / 6</div>
+                <div>• Career Jewels Collected before fall: {collectedRelicIds.size} / 5</div>
+                <div>• Corporate Asuras Vanquished: {6 - aliveDemons} / 6</div>
+              </div>
+            )}
 
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3 font-hud text-xs uppercase tracking-[0.18em]">
               <button

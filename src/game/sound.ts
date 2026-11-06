@@ -375,45 +375,119 @@ class SoundEngine {
   }
 
   /**
-   * Stereo-panned sandstone/meadow footstep with natural heel-toe cadence
+   * Stereo-panned sandstone flagstone / meadow turf footstep with natural heel-toe cadence & surface texture
    */
-  public playFootstep(sprint = false): void {
+  public playFootstep(sprint = false, onStone = false): void {
+    this.unlocked = true;
     const ctx = this.getContext();
     if (!ctx) return;
 
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
+    const tapOsc = ctx.createOscillator();
     const gain = ctx.createGain();
+    const tapGain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
     const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
 
     this.footstepSide *= -1;
     const pitchVar = 0.93 + Math.random() * 0.14;
-    const baseFreq = (sprint ? 132 : 104) * pitchVar;
+    const baseFreq = (onStone ? (sprint ? 168 : 138) : sprint ? 118 : 94) * pitchVar;
 
-    osc.type = 'triangle';
+    // 1. Low-mid heel impact thud
+    osc.type = onStone ? 'triangle' : 'sine';
     osc.frequency.setValueAtTime(baseFreq, now);
-    osc.frequency.exponentialRampToValueAtTime(36, now + 0.065);
+    osc.frequency.exponentialRampToValueAtTime(onStone ? 48 : 34, now + 0.085);
 
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(sprint ? 520 : 410, now);
+    filter.frequency.setValueAtTime(onStone ? 920 : 540, now);
 
-    gain.gain.setValueAtTime(sprint ? 0.055 : 0.042, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    const stepVol = sprint ? 0.28 : 0.22;
+    gain.gain.setValueAtTime(stepVol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    // 2. High-frequency surface transient (crisp stone clack vs. grassy turf rustle)
+    tapOsc.type = onStone ? 'square' : 'sawtooth';
+    tapOsc.frequency.setValueAtTime((onStone ? 1120 : 580) * pitchVar, now + 0.012);
+    tapOsc.frequency.exponentialRampToValueAtTime(onStone ? 320 : 180, now + 0.065);
+
+    tapGain.gain.setValueAtTime(onStone ? 0.048 : 0.036, now + 0.012);
+    tapGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.07);
 
     osc.connect(filter);
+    tapOsc.connect(tapGain);
+    tapGain.connect(filter);
     filter.connect(gain);
+
     if (panner) {
-      panner.pan.setValueAtTime(this.footstepSide * 0.18, now);
+      panner.pan.setValueAtTime(this.footstepSide * 0.22, now);
       gain.connect(panner);
-      this.connectOutput(panner, 0.1);
+      this.connectOutput(panner, onStone ? 0.18 : 0.08);
     } else {
-      this.connectOutput(gain, 0.1);
+      this.connectOutput(gain, onStone ? 0.18 : 0.08);
     }
 
     osc.start(now);
-    osc.stop(now + 0.075);
+    tapOsc.start(now + 0.012);
+    osc.stop(now + 0.095);
+    tapOsc.stop(now + 0.075);
   }
+
+  /**
+   * Ethereal dissolution & spirit-purification sound when a Corporate Asura vanishes after defeat
+   */
+  public playDemonVanish(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const notes = [220, 329.63, 440, 659.25, 880];
+    notes.forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = i % 2 === 0 ? 'sine' : 'triangle';
+      const start = now + i * 0.06;
+      osc.frequency.setValueAtTime(f * 0.85, start);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.45, start + 0.55);
+
+      gain.gain.setValueAtTime(0.065 / (1 + i * 0.2), start);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.6);
+
+      osc.connect(gain);
+      this.connectOutput(gain, 0.62);
+      osc.start(start);
+      osc.stop(start + 0.62);
+    });
+  }
+
+  /**
+   * Cheerful robotic/marimba companion voice chirp when chatting with Hypo the Guide
+   */
+  public playHypoVoiceChime(): void {
+    this.unlocked = true;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((f, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      const t = now + idx * 0.055;
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.06, t + 0.14);
+
+      gain.gain.setValueAtTime(0.07, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+      osc.connect(gain);
+      this.connectOutput(gain, 0.35);
+      osc.start(t);
+      osc.stop(t + 0.2);
+    });
+  }
+
 
   /**
    * Shinobi Shadow-Step Dash / Dodge whoosh + optional Perfect Dodge chime

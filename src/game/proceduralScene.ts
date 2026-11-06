@@ -9,13 +9,24 @@ import {
   FORGE_WEAPONS,
   INITIAL_DEMON_SPAWNS,
   LAYOFF_BOSS_CONFIG,
+  RECRUITER_TEMPLE_CONFIG,
+  HYPO_GUIDE_CONFIG,
   MonumentType,
   WeaponId,
   DemonArchetype,
 } from '../data/portfolioStops';
-import { groundHeightAt, DemonCombatState } from './worldLogic';
+import {
+  groundHeightAt,
+  DemonCombatState,
+  TREE_GROVE_POSITIONS,
+  HILL_SHRINE_PILLARS,
+  BOULDER_OUTCROPS,
+} from './worldLogic';
 import { createProceduralWeatherRig, ProceduralWeatherRig } from './weatherRig';
 import { WeatherPresetId } from './weatherSystem';
+
+const _palmVec = new THREE.Vector3();
+
 
 export type TimeOfDay = 'dawn' | 'noon' | 'twilight';
 
@@ -78,6 +89,8 @@ export interface DemonEntity {
   weaponGroup: THREE.Group;
   slashArcMesh: THREE.Mesh;
   telegraphRingMesh: THREE.Mesh;
+  territoryRingMesh: THREE.Mesh;
+  deathVortexMesh: THREE.Mesh;
   hpBarGroup: THREE.Group;
   hpBarFill: THREE.Mesh;
   postureBarFill: THREE.Mesh;
@@ -94,10 +107,12 @@ export interface DemonEntity {
   maxPosture: number;
   scale: number;
   alive: boolean;
+  dyingTimer: number;
   hitFlashTimer: number;
   attackCooldown: number;
   perilousTimer: number;
   aggroRange: number;
+  territoryRadius: number;
   mixer: THREE.AnimationMixer | null;
   actions: {
     idle?: THREE.AnimationAction;
@@ -177,6 +192,9 @@ export interface AncientWorldScene {
   monumentRigs: Map<string, MonumentRig>;
   relicRigs: Map<string, RelicRig>;
   weaponForgeRigs: Map<WeaponId, WeaponForgeRig>;
+  recruiterTempleGroup: THREE.Group;
+  hypoGuideGroup: THREE.Group;
+  bossLockHologramGroup: THREE.Group;
   demons: DemonEntity[];
   layoffBoss: LayoffBossEntity;
   cameraBlockers: THREE.Object3D[];
@@ -332,31 +350,49 @@ function createTerrainMosaicTexture(): THREE.CanvasTexture {
   canvas.height = 512;
   const ctx = canvas.getContext('2d')!;
 
-  // Rich forest emerald & dark highland moss base (high contrast against sunlit grass tips)
-  ctx.fillStyle = '#1b311d';
+  // Rich highland forest loam & short alpine turf base
+  const baseGrad = ctx.createLinearGradient(0, 0, 512, 512);
+  baseGrad.addColorStop(0, '#1f3622');
+  baseGrad.addColorStop(0.5, '#243d26');
+  baseGrad.addColorStop(1, '#1a2f1d');
+  ctx.fillStyle = baseGrad;
   ctx.fillRect(0, 0, 512, 512);
 
-  for (let i = 0; i < 960; i++) {
+  // Subtle organic moss & warm earth patches
+  for (let i = 0; i < 640; i++) {
     const x = (i * 97) % 512;
     const y = (i * 151) % 512;
-    const r = 8 + (i % 24);
+    const r = 3 + (i % 9);
     ctx.fillStyle =
-      i % 6 === 0
-        ? 'rgba(120, 92, 48, 0.16)'
+      i % 7 === 0
+        ? 'rgba(110, 86, 48, 0.14)'
         : i % 4 === 0
-        ? 'rgba(42, 82, 44, 0.28)'
+        ? 'rgba(46, 86, 46, 0.22)'
         : i % 3 === 0
-        ? 'rgba(68, 108, 48, 0.22)'
-        : 'rgba(18, 38, 22, 0.34)';
+        ? 'rgba(64, 102, 48, 0.18)'
+        : 'rgba(18, 36, 22, 0.25)';
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
 
+  // Fine micro-grain pebbles & short turf blade strokes (eliminates blotchy circles on hills!)
+  for (let j = 0; j < 3200; j++) {
+    const px = (j * 53) % 512;
+    const py = (j * 113) % 512;
+    ctx.fillStyle =
+      j % 3 === 0
+        ? 'rgba(134, 168, 92, 0.16)'
+        : j % 2 === 0
+        ? 'rgba(20, 34, 21, 0.22)'
+        : 'rgba(148, 130, 98, 0.12)';
+    ctx.fillRect(px, py, 2, 2);
+  }
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(26, 26);
+  tex.repeat.set(42, 42);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -741,100 +777,148 @@ function createPlayerCharacter(): PlayerRig {
     clearcoatRoughness: 0.08,
   });
 
-  // Sculpted Smooth Dark-Obsidian & Burnished Gold Shinobi Fallback Silhouette
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.62, 32), armorSlateMat);
-  torso.position.y = 1.02;
-  torso.castShadow = true;
-  fallbackHeroGroup.add(torso);
+  // Ornate Muscular Vedic Warrior Overhaul (Bronze Skin, Ornate Silk Dhoti, Glowing Tattoos)
+  const bronzeSkinMat = new THREE.MeshPhysicalMaterial({
+    color: 0x8b5e3c,
+    roughness: 0.35,
+    metalness: 0.15,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.2,
+    emissive: 0x451a03,
+    emissiveIntensity: 0.1,
+  });
 
-  const chestPlate = new THREE.Mesh(
-    new RoundedBoxGeometry(0.4, 0.38, 0.26, 4, 0.045),
-    obsidianLacquerMat
+  const dhotiMat = new THREE.MeshPhysicalMaterial({
+    color: 0x991b1b,
+    roughness: 0.5,
+    sheen: 1.0,
+    sheenColor: new THREE.Color(0xfde68a),
+    side: THREE.DoubleSide,
+  });
+
+  const tattooMat = new THREE.MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.65,
+    blending: THREE.AdditiveBlending,
+  });
+
+  // 1. Muscular Torso (V-Tapered Chest & Core)
+  const torsoGroup = new THREE.Group();
+  torsoGroup.position.y = 1.02;
+  fallbackHeroGroup.add(torsoGroup);
+
+  const mainTorso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.24, 0.18, 0.58, 32),
+    bronzeSkinMat
   );
-  chestPlate.position.set(0, 1.08, 0);
-  fallbackHeroGroup.add(chestPlate);
+  mainTorso.castShadow = true;
+  torsoGroup.add(mainTorso);
 
-  const spineTrim = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.36, 0.28, 3, 0.015), goldMat);
-  spineTrim.position.set(0, 1.08, 0);
-  fallbackHeroGroup.add(spineTrim);
+  // Defined Pecs & Abs
+  const chestMuscles = new THREE.Mesh(
+    new RoundedBoxGeometry(0.38, 0.28, 0.18, 4, 0.08),
+    bronzeSkinMat
+  );
+  chestMuscles.position.set(0, 0.15, 0.08);
+  torsoGroup.add(chestMuscles);
 
-  const waistBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.195, 0.1, 32), goldMat);
-  waistBelt.position.y = 0.74;
-  fallbackHeroGroup.add(waistBelt);
+  const abdominalCore = new THREE.Mesh(
+    new RoundedBoxGeometry(0.22, 0.22, 0.14, 3, 0.06),
+    bronzeSkinMat
+  );
+  abdominalCore.position.set(0, -0.1, 0.06);
+  torsoGroup.add(abdominalCore);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.165, 32, 24), obsidianLacquerMat);
-  head.scale.set(0.92, 1.08, 1.02);
-  head.position.y = 1.54;
+  // 2. Head & Facial Features (Mythic Warrior)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 32, 24), bronzeSkinMat);
+  head.scale.set(0.95, 1.15, 1.0);
+  head.position.y = 1.52;
   head.castShadow = true;
   fallbackHeroGroup.add(head);
 
-  const visorBand = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.055, 0.22, 3, 0.012), goldMat);
-  visorBand.position.set(0, 1.55, 0.06);
-  fallbackHeroGroup.add(visorBand);
+  // Glowing Third Eye / Ajna Chakra Tattoo
+  const thirdEye = new THREE.Mesh(new THREE.CircleGeometry(0.015, 16), tattooMat);
+  thirdEye.position.set(0, 1.6, 0.14);
+  fallbackHeroGroup.add(thirdEye);
 
-  const helmetCrest = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.14, 0.24, 3, 0.01), goldMat);
-  helmetCrest.position.set(0, 1.68, 0);
-  fallbackHeroGroup.add(helmetCrest);
+  // Burnished Gold Warrior Crown / Band
+  const warriorCrown = new THREE.Mesh(
+    new THREE.TorusGeometry(0.14, 0.018, 16, 48, Math.PI),
+    goldMat
+  );
+  warriorCrown.rotation.x = Math.PI / 2;
+  warriorCrown.position.y = 1.65;
+  fallbackHeroGroup.add(warriorCrown);
 
+  // 3. Powerful Shoulders & Arms
   for (const side of [-1, 1]) {
-    const pauldronGrp = new THREE.Group();
-    pauldronGrp.position.set(side * 0.26, 1.32, 0);
-    pauldronGrp.rotation.z = side * -0.26;
-    const plate = new THREE.Mesh(
-      new RoundedBoxGeometry(0.16, 0.09, 0.24, 4, 0.02),
-      obsidianLacquerMat
-    );
-    const rim = new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.028, 0.26, 3, 0.008), goldMat);
-    rim.position.y = -0.03;
-    pauldronGrp.add(plate, rim);
-    fallbackHeroGroup.add(pauldronGrp);
+    const shoulderDeltoid = new THREE.Mesh(new THREE.SphereGeometry(0.13, 24, 16), bronzeSkinMat);
+    shoulderDeltoid.position.set(side * 0.3, 1.34, 0);
+    shoulderDeltoid.scale.x = 1.25;
+    fallbackHeroGroup.add(shoulderDeltoid);
+
+    // Gold Armlets (Angada)
+    const armlet = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.015, 16, 32), goldMat);
+    armlet.rotation.x = Math.PI / 2;
+    armlet.position.set(side * 0.32, 1.28, 0);
+    fallbackHeroGroup.add(armlet);
   }
 
-  const chakraHaloGroup = new THREE.Group();
-  chakraHaloGroup.visible = false;
-
-  const cloakMesh = new THREE.Mesh(new THREE.BufferGeometry(), capeMat);
-  cloakMesh.visible = false;
-
-  const leftLeg = new THREE.Group();
-  leftLeg.position.set(0.11, 0.65, 0);
-  const leftLegMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.078, 0.44, 16, 24),
-    armorSlateMat
-  );
-  leftLegMesh.position.y = -0.25;
-  leftLeg.add(leftLegMesh);
-  fallbackHeroGroup.add(leftLeg);
-
-  const rightLeg = new THREE.Group();
-  rightLeg.position.set(-0.11, 0.65, 0);
-  const rightLegMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.078, 0.44, 16, 24),
-    armorSlateMat
-  );
-  rightLegMesh.position.y = -0.25;
-  rightLeg.add(rightLegMesh);
-  fallbackHeroGroup.add(rightLeg);
-
   const leftArm = new THREE.Group();
-  leftArm.position.set(0.28, 1.24, 0);
-  const leftArmMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.062, 0.36, 16, 24),
-    armorSlateMat
-  );
-  leftArmMesh.position.y = -0.18;
-  leftArm.add(leftArmMesh);
+  leftArm.position.set(0.3, 1.3, 0);
+  const leftBicep = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.3, 16, 24), bronzeSkinMat);
+  leftBicep.position.y = -0.18;
+  leftArm.add(leftBicep);
   fallbackHeroGroup.add(leftArm);
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(-0.28, 1.22, 0);
-  const rightArmMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.062, 0.36, 16, 24),
-    armorSlateMat
-  );
-  rightArmMesh.position.y = -0.18;
-  rightArm.add(rightArmMesh);
+  rightArm.position.set(-0.3, 1.3, 0);
+  const rightBicep = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.3, 16, 24), bronzeSkinMat);
+  rightBicep.position.y = -0.18;
+  rightArm.add(rightBicep);
   fallbackHeroGroup.add(rightArm);
+
+  // 4. Legs & Ornate Silk Dhoti
+  const leftLeg = new THREE.Group();
+  leftLeg.position.set(0.12, 0.72, 0);
+  const leftQuad = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.42, 16, 24), bronzeSkinMat);
+  leftQuad.position.y = -0.25;
+  leftLeg.add(leftQuad);
+  fallbackHeroGroup.add(leftLeg);
+
+  const rightLeg = new THREE.Group();
+  rightLeg.position.set(-0.12, 0.72, 0);
+  const rightQuad = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.42, 16, 24), bronzeSkinMat);
+  rightQuad.position.y = -0.25;
+  rightLeg.add(rightQuad);
+  fallbackHeroGroup.add(rightLeg);
+
+  // Silk Dhoti / Waist Cloth
+  const dhotiGroup = new THREE.Group();
+  dhotiGroup.position.y = 0.75;
+  fallbackHeroGroup.add(dhotiGroup);
+
+  const dhotiMain = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 0.55, 32, 1, true), dhotiMat);
+  dhotiMain.position.y = -0.2;
+  dhotiGroup.add(dhotiMain);
+
+  const goldBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.08, 32), goldMat);
+  dhotiGroup.add(goldBelt);
+
+  const chakraHaloGroup = new THREE.Group();
+  chakraHaloGroup.visible = false;
+  fallbackHeroGroup.add(chakraHaloGroup);
+
+  const cloakMesh = new THREE.Mesh(new THREE.BufferGeometry(), capeMat);
+  cloakMesh.visible = false;
+  fallbackHeroGroup.add(cloakMesh);
+
+  // Sash / Uttariya
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, 0.02), dhotiMat);
+  sash.rotation.z = -Math.PI / 4;
+  sash.position.set(0, 0.35, 0.15);
+  torsoGroup.add(sash);
 
   // Hand-locked Weapon Pivot: origin (0,0,0) sits directly inside the right hand palm gripping the weapon hilt
   const weaponArmPivot = new THREE.Group();
@@ -964,56 +1048,97 @@ function createPlayerCharacter(): PlayerRig {
   dashRingMesh.position.set(0, 0.18, 0);
   group.add(dashRingMesh);
 
-  // Zelda BotW / TotK Garuda Sky-Cloak Paraglider with smooth sculpted wings
+  // Grand Garuda Sky-Cloak Astral Wing-Glider attached to bodyGroup shoulders for authentic aerial gliding!
   const paragliderGroup = new THREE.Group();
-  paragliderGroup.position.set(0, 2.35, 0);
+  paragliderGroup.position.set(0, 1.48, -0.16);
   paragliderGroup.visible = false;
-  group.add(paragliderGroup);
+  bodyGroup.add(paragliderGroup);
 
-  const gliderBar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.9, 24), goldMat);
-  gliderBar.rotation.z = Math.PI / 2;
-  gliderBar.position.y = -0.32;
-  paragliderGroup.add(gliderBar);
+  const gliderCoreCrest = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.18, 2),
+    goldMat
+  );
+  gliderCoreCrest.scale.set(1.1, 0.85, 0.55);
+  paragliderGroup.add(gliderCoreCrest);
+
+  const gliderHalo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.32, 0.024, 16, 48),
+    goldMat
+  );
+  paragliderGroup.add(gliderHalo);
 
   const wingShape = new THREE.Shape();
   wingShape.moveTo(0, 0);
-  wingShape.quadraticCurveTo(0.85, 0.45, 1.55, 0.12);
-  wingShape.quadraticCurveTo(1.15, -0.38, 0, -0.48);
+  wingShape.quadraticCurveTo(0.95, 0.52, 1.85, 0.24);
+  wingShape.quadraticCurveTo(1.42, -0.28, 0, -0.42);
   wingShape.closePath();
   const wingGeo = new THREE.ExtrudeGeometry(wingShape, {
     steps: 6,
-    depth: 0.024,
+    depth: 0.032,
     bevelEnabled: true,
-    bevelThickness: 0.01,
-    bevelSize: 0.012,
+    bevelThickness: 0.014,
+    bevelSize: 0.016,
     bevelSegments: 4,
     curveSegments: 28,
   });
-  wingGeo.rotateX(Math.PI * 0.5);
   wingGeo.computeVertexNormals();
 
   const wingMat = new THREE.MeshPhysicalMaterial({
     color: 0x0ea5e9,
     emissive: 0x38bdf8,
-    emissiveIntensity: 0.85,
-    roughness: 0.2,
-    metalness: 0.35,
-    clearcoat: 0.8,
+    emissiveIntensity: 1.15,
+    roughness: 0.16,
+    metalness: 0.45,
+    clearcoat: 1.0,
+    transparent: true,
+    opacity: 0.92,
   });
-  const leftWing = new THREE.Mesh(wingGeo, wingMat);
-  leftWing.scale.x = -1;
-  leftWing.position.set(-0.1, 0, 0.1);
-  leftWing.rotation.y = 0.16;
-  paragliderGroup.add(leftWing);
 
-  const rightWing = new THREE.Mesh(wingGeo, wingMat);
-  rightWing.position.set(0.1, 0, 0.1);
-  rightWing.rotation.y = -0.16;
-  paragliderGroup.add(rightWing);
+  const pinionFeatherGeo = new THREE.ConeGeometry(0.065, 0.78, 16);
+  pinionFeatherGeo.rotateZ(-Math.PI / 2);
 
-  const centerFin = new THREE.Mesh(new THREE.SphereGeometry(0.24, 28, 20), goldMat);
-  centerFin.scale.set(0.75, 0.36, 1.65);
-  paragliderGroup.add(centerFin);
+  for (const side of [-1, 1]) {
+    const wingAssembly = new THREE.Group();
+    wingAssembly.scale.x = side;
+    wingAssembly.position.set(side * 0.14, 0.06, 0);
+    wingAssembly.rotation.set(0.18, -side * 0.18, side * 0.12);
+
+    const primaryWing = new THREE.Mesh(wingGeo, wingMat);
+    wingAssembly.add(primaryWing);
+
+    const goldLeadingEdge = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.026, 0.018, 1.82, 20),
+      goldMat
+    );
+    goldLeadingEdge.rotation.z = -Math.PI * 0.44;
+    goldLeadingEdge.position.set(0.88, 0.22, 0.02);
+    wingAssembly.add(goldLeadingEdge);
+
+    // 4 Radiant Astral Feather Pinions fanning out along each wing
+    for (let f = 0; f < 4; f++) {
+      const pinion = new THREE.Mesh(pinionFeatherGeo, f % 2 === 0 ? goldMat : wingMat);
+      pinion.position.set(0.55 + f * 0.34, -0.12 + f * 0.05, -0.01);
+      pinion.rotation.z = -0.25 + f * 0.08;
+      wingAssembly.add(pinion);
+    }
+
+    // Wind-stream ribbon trailing behind each wingtip
+    const windStream = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.045, 2.4, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0x7dd3fc,
+        transparent: true,
+        opacity: 0.65,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    windStream.rotation.x = Math.PI / 2;
+    windStream.position.set(1.72, 0.15, -1.2);
+    wingAssembly.add(windStream);
+
+    paragliderGroup.add(wingAssembly);
+  }
 
   // No revolving jewels around the character (kept empty per user request)
   const powerOrbitals: THREE.Mesh[] = [];
@@ -1070,20 +1195,24 @@ function createPlayerCharacter(): PlayerRig {
     activeActionName: 'idle',
     setAnimationState(nextState: 'idle' | 'walk' | 'run', speedMultiplier = 1) {
       if (!this.mixer) return;
-      if (this.activeActionName !== nextState) {
+      const isGliding = this.paragliderGroup.visible;
+      // Force idle posture during glide to prevent walking in mid-air
+      const stateToUse = isGliding ? 'idle' : nextState;
+
+      if (this.activeActionName !== stateToUse) {
         const prevAction = this.actions[this.activeActionName];
-        const nextAction = this.actions[nextState];
+        const nextAction = this.actions[stateToUse];
         if (nextAction) {
           nextAction.reset().fadeIn(0.16).play();
           if (prevAction && prevAction !== nextAction) {
             prevAction.fadeOut(0.16);
           }
-          this.activeActionName = nextState;
+          this.activeActionName = stateToUse;
         }
       }
       const currentAct = this.actions[this.activeActionName];
       if (currentAct) {
-        currentAct.timeScale = speedMultiplier;
+        currentAct.timeScale = isGliding ? 0.35 : speedMultiplier;
       }
     },
     setEquippedWeapon(weaponId: WeaponId) {
@@ -1095,8 +1224,6 @@ function createPlayerCharacter(): PlayerRig {
     },
   };
 
-  // Load real rigged 3D character `Soldier.glb`, apply smooth Steel-Obsidian & Burnished Gold Shinobi Armor,
-  // and strip the rifle-holding forearm/hand keyframe tracks so the character holds the sword naturally at the right side!
   const loader = new GLTFLoader();
   loader.load(
     'https://threejs.org/examples/models/gltf/Soldier.glb',
@@ -1104,19 +1231,12 @@ function createPlayerCharacter(): PlayerRig {
       const model = gltf.scene;
       model.scale.setScalar(1.08);
       model.rotation.y = Math.PI;
+
       model.traverse((child) => {
         if (child.name === 'mixamorigRightHand' || /RightHand$/i.test(child.name)) {
           rig.rightHandBone = child;
         } else if (child.name === 'mixamorigLeftHand' || /LeftHand$/i.test(child.name)) {
           rig.leftHandBone = child;
-        } else if (child.name === 'mixamorigRightArm' || /RightArm$/i.test(child.name)) {
-          rig.rightArmBone = child;
-        } else if (child.name === 'mixamorigRightForeArm' || /RightForeArm$/i.test(child.name)) {
-          rig.rightForeArmBone = child;
-        } else if (child.name === 'mixamorigLeftArm' || /LeftArm$/i.test(child.name)) {
-          rig.leftArmBone = child;
-        } else if (child.name === 'mixamorigLeftForeArm' || /LeftForeArm$/i.test(child.name)) {
-          rig.leftForeArmBone = child;
         }
 
         if ((child as THREE.Mesh).isMesh) {
@@ -1127,18 +1247,19 @@ function createPlayerCharacter(): PlayerRig {
           if (m.material instanceof THREE.MeshStandardMaterial) {
             const mat = m.material.clone();
             mat.flatShading = false;
+            // Apply Mecha Shinobi Armor Aesthetic
             const isVisor = /visor/i.test(m.name);
             if (isVisor) {
-              mat.color = new THREE.Color(0xfbbf24);
+              mat.color = new THREE.Color(0xfbbf24); // Gold Visor
               mat.emissive = new THREE.Color(0xd97706);
               mat.emissiveIntensity = 0.65;
               mat.metalness = 0.92;
               mat.roughness = 0.14;
             } else {
-              mat.color = new THREE.Color(0x526077);
-              mat.metalness = 0.68;
+              mat.color = new THREE.Color(0x1e2532); // Steel Slate Armor
+              mat.metalness = 0.78;
               mat.roughness = 0.24;
-              mat.emissive = new THREE.Color(0x162033);
+              mat.emissive = new THREE.Color(0x0b1120);
               mat.emissiveIntensity = 0.22;
             }
             m.material = mat;
@@ -1154,16 +1275,26 @@ function createPlayerCharacter(): PlayerRig {
       rig.mixer = mixer;
 
       const idleClip = THREE.AnimationClip.findByName(gltf.animations, 'Idle') || gltf.animations[0];
-      const walkClip =
-        THREE.AnimationClip.findByName(gltf.animations, 'Walk') || gltf.animations[3] || idleClip;
-      const runClip =
-        THREE.AnimationClip.findByName(gltf.animations, 'Run') || gltf.animations[1] || walkClip;
+      const walkClip = THREE.AnimationClip.findByName(gltf.animations, 'Walk') || gltf.animations[3] || idleClip;
+      const runClip = THREE.AnimationClip.findByName(gltf.animations, 'Run') || gltf.animations[1] || walkClip;
 
       if (idleClip) rig.actions.idle = mixer.clipAction(idleClip);
       if (walkClip) rig.actions.walk = mixer.clipAction(walkClip);
       if (runClip) rig.actions.run = mixer.clipAction(runClip);
 
+      if (rig.rightHandBone) {
+        rig.rightHandBone.add(weaponArmPivot);
+        weaponArmPivot.position.set(0, 0, 0);
+        weaponArmPivot.rotation.set(0, 0, 0);
+      }
+      if (rig.leftHandBone) {
+        rig.leftHandBone.add(offhandArmPivot);
+        offhandArmPivot.position.set(0, 0, 0);
+        offhandArmPivot.rotation.set(0, 0, 0);
+      }
+
       rig.actions.idle?.play();
+
     },
     undefined,
     () => {}
@@ -1311,6 +1442,38 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
   telegraphRingMesh.position.y = 0.05;
   group.add(telegraphRingMesh);
 
+  // Subtle Territorial Perimeter Ring centered at demon's home outpost (attached to scene in buildAncientWorldScene)
+  const terrRadius = config.territoryRadius || config.aggroRange + 2.5;
+  const terrGeo = new THREE.RingGeometry(terrRadius - 0.18, terrRadius, 64);
+  terrGeo.rotateX(-Math.PI / 2);
+  const terrMat = new THREE.MeshBasicMaterial({
+    color: config.colorHex,
+    transparent: true,
+    opacity: 0.26,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const territoryRingMesh = new THREE.Mesh(terrGeo, terrMat);
+  territoryRingMesh.position.set(config.position.x, y + 0.06, config.position.z);
+
+  // Dramatic Death / Dissolution Vortex Ring (plays when demon is vanquished!)
+  const vortexGeo = new THREE.TorusGeometry(0.95, 0.08, 16, 48);
+  vortexGeo.rotateX(Math.PI / 2);
+  const vortexMat = new THREE.MeshBasicMaterial({
+    color: 0xfef08a,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const deathVortexMesh = new THREE.Mesh(vortexGeo, vortexMat);
+  deathVortexMesh.position.y = 0.4;
+  deathVortexMesh.visible = false;
+  group.add(deathVortexMesh);
+
   // High-Contrast Billboard 3D Health & Posture Bar Group with Corporate Lingo Nameplate
   const hpBarGroup = new THREE.Group();
   hpBarGroup.position.y = 2.35 * config.scale;
@@ -1372,6 +1535,8 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
     weaponGroup,
     slashArcMesh,
     telegraphRingMesh,
+    territoryRingMesh,
+    deathVortexMesh,
     hpBarGroup,
     hpBarFill,
     postureBarFill,
@@ -1388,10 +1553,12 @@ function createDemonRig(config: (typeof INITIAL_DEMON_SPAWNS)[number]): DemonEnt
     maxPosture: 65,
     scale: config.scale,
     alive: true,
+    dyingTimer: 0,
     hitFlashTimer: 0,
     attackCooldown: 0,
     perilousTimer: 0,
     aggroRange: config.aggroRange,
+    territoryRadius: config.territoryRadius || config.aggroRange + 2.5,
     mixer: null,
     actions: {},
     activeClip: 'idle',
@@ -1984,23 +2151,27 @@ function createMonumentMesh(
 }
 
 /**
- * Builds Ghost of Tsushima / Zelda style Slender Botanical Wind-Swept Grass Field
+ * Builds Lush, Fuller Alpine Meadow & Hillside Grass Field (0.56m medium-full height, 7-blade tufts,
+ * distributed across both the central valley AND the surrounding hills up to r = 138m!)
  */
 function createZeldaWindGrassField(isSoftwareGl: boolean): {
   mesh: THREE.InstancedMesh;
   uniforms: { uTime: { value: number }; uSunIntensity: { value: number } };
 } {
-  const bladeCount = isSoftwareGl ? 4200 : 12000;
+  const bladeCount = isSoftwareGl ? 18000 : 48000;
 
-  // Slender 5-blade botanical fan (0.07m wide instead of fat 0.28m ribbons!)
-  const singleBlade = new THREE.PlaneGeometry(0.072, 0.86, 1, 4);
-  singleBlade.translate(0, 0.43, 0);
-  const b2 = singleBlade.clone().rotateY(0.65).rotateZ(0.08).translate(0.07, 0, 0.05);
-  const b3 = singleBlade.clone().rotateY(-0.65).rotateZ(-0.08).translate(-0.07, 0, -0.05);
-  const b4 = singleBlade.clone().rotateY(1.35).rotateX(0.09).translate(0.04, 0, -0.07);
-  const b5 = singleBlade.clone().rotateY(-1.35).rotateX(-0.09).translate(-0.04, 0, 0.07);
+  // Lush 8-blade botanical turf tuft (0.64m tall, 0.08m wide so meadows and hillsides look full and verdant)
+  const singleBlade = new THREE.PlaneGeometry(0.1, 0.72, 1, 4);
+  singleBlade.translate(0, 0.32, 0);
+  const b2 = singleBlade.clone().rotateY(0.55).rotateZ(0.08).translate(0.06, 0, 0.05);
+  const b3 = singleBlade.clone().rotateY(-0.55).rotateZ(-0.08).translate(-0.06, 0, -0.05);
+  const b4 = singleBlade.clone().rotateY(1.15).rotateX(0.09).translate(0.04, 0, -0.06);
+  const b5 = singleBlade.clone().rotateY(-1.15).rotateX(-0.09).translate(-0.04, 0, 0.06);
+  const b6 = singleBlade.clone().rotateY(2.1).rotateZ(0.1).translate(0.07, 0, -0.02);
+  const b7 = singleBlade.clone().rotateY(-2.1).rotateZ(-0.1).translate(-0.07, 0, 0.02);
+  const b8 = singleBlade.clone().rotateY(Math.PI / 2).rotateX(0.05).translate(0, 0, 0.08);
 
-  const blades = [singleBlade, b2, b3, b4, b5];
+  const blades = [singleBlade, b2, b3, b4, b5, b6, b7, b8];
   const singlePosLen = (singleBlade.attributes.position.array as Float32Array).length;
   const singleIdxArr = singleBlade.index!.array;
   const vCount = singleBlade.attributes.position.count;
@@ -2032,18 +2203,18 @@ function createZeldaWindGrassField(isSoftwareGl: boolean): {
       varying float vWindWave;
 
       void main() {
-        vHeightPct = clamp(position.y / 0.86, 0.0, 1.0);
+        vHeightPct = clamp(position.y / 0.56, 0.0, 1.0);
         vec4 worldBase = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
 
-        float wave = sin(worldBase.x * 0.18 + worldBase.z * 0.14 + uTime * 2.45)
-                   + 0.48 * cos(worldBase.x * 0.09 - worldBase.z * 0.21 + uTime * 1.75);
+        float wave = sin(worldBase.x * 0.14 + worldBase.z * 0.12 + uTime * 1.75)
+                   + 0.38 * cos(worldBase.x * 0.08 - worldBase.z * 0.16 + uTime * 1.2);
         vWindWave = wave;
 
         vec3 displaced = position;
         displaced.x *= (1.0 - vHeightPct * 0.84);
-        float bend = vHeightPct * vHeightPct * 0.36 * wave;
+        float bend = vHeightPct * vHeightPct * 0.145 * wave;
         displaced.x += bend;
-        displaced.z += bend * 0.6;
+        displaced.z += bend * 0.52;
 
         vec4 worldPos = instanceMatrix * vec4(displaced, 1.0);
         gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -2055,15 +2226,15 @@ function createZeldaWindGrassField(isSoftwareGl: boolean): {
       varying float vWindWave;
 
       void main() {
-        vec3 rootColor = vec3(0.06, 0.17, 0.09);
-        vec3 midColor  = vec3(0.16, 0.39, 0.18);
-        vec3 tipColor  = vec3(0.58, 0.76, 0.26);
+        vec3 rootColor = vec3(0.06, 0.19, 0.10);
+        vec3 midColor  = vec3(0.16, 0.42, 0.20);
+        vec3 tipColor  = vec3(0.48, 0.68, 0.24);
 
-        vec3 baseCol = mix(rootColor, midColor, smoothstep(0.0, 0.55, vHeightPct));
-        baseCol = mix(baseCol, tipColor, smoothstep(0.48, 1.0, vHeightPct));
+        vec3 baseCol = mix(rootColor, midColor, smoothstep(0.0, 0.52, vHeightPct));
+        baseCol = mix(baseCol, tipColor, smoothstep(0.50, 1.0, vHeightPct));
 
-        float gustHighlight = smoothstep(0.25, 1.15, vWindWave) * vHeightPct * 0.22;
-        vec3 finalCol = (baseCol + vec3(gustHighlight * 1.15, gustHighlight * 1.05, 0.03)) * uSunIntensity;
+        float gustHighlight = smoothstep(0.30, 1.25, vWindWave) * vHeightPct * 0.16;
+        vec3 finalCol = (baseCol + vec3(gustHighlight * 1.08, gustHighlight * 0.96, 0.03)) * uSunIntensity;
 
         gl_FragColor = vec4(finalCol, 1.0);
       }
@@ -2084,15 +2255,27 @@ function createZeldaWindGrassField(isSoftwareGl: boolean): {
 
   while (placed < bladeCount) {
     const angle = nextRand() * Math.PI * 2;
-    const radius = 4.8 + Math.pow(nextRand(), 0.76) * 74;
+    // Distribute across valley and the full hill perimeter (up to 185m)!
+    const isHillside = placed % 8 >= 4;
+    const radius = isHillside
+      ? 65.0 + Math.pow(nextRand(), 0.8) * 125.0
+      : 4.5 + Math.pow(nextRand(), 0.72) * 85.0;
     const gx = Math.cos(angle) * radius;
     const gz = Math.sin(angle) * radius;
 
-    if (Math.abs(gx) < 3.4 && gz > -44 && gz < 30) continue;
-    if (Math.abs(gz) < 3.2 && Math.abs(gx) < 42) continue;
+    if (Math.abs(gx) < 3.2 && gz > -46 && gz < 58) continue;
+    if (Math.abs(gz) < 3.0 && Math.abs(gx) < 42) continue;
     if (Math.hypot(gx, gz + 48) < 12.4) continue;
+    if (
+      Math.hypot(
+        gx - RECRUITER_TEMPLE_CONFIG.position.x,
+        gz - RECRUITER_TEMPLE_CONFIG.position.z
+      ) < 9.2
+    ) {
+      continue;
+    }
     const riverZ = -3.5 + Math.sin(gx * 0.09) * 3.4;
-    if (Math.abs(gz - riverZ) < 4.2) continue;
+    if (Math.abs(gz - riverZ) < 4.1) continue;
 
     let insideMonument = false;
     for (const stop of PORTFOLIO_STOPS) {
@@ -2104,14 +2287,15 @@ function createZeldaWindGrassField(isSoftwareGl: boolean): {
     if (insideMonument) continue;
 
     const gy = groundHeightAt(gx, gz);
-    dummy.position.set(gx, gy - 0.03, gz);
+    dummy.position.set(gx, gy - 0.02, gz);
     dummy.rotation.set(
-      (nextRand() - 0.5) * 0.14,
+      (nextRand() - 0.5) * 0.12,
       nextRand() * Math.PI * 2,
-      (nextRand() - 0.5) * 0.14
+      (nextRand() - 0.5) * 0.12
     );
-    const scaleH = 0.65 + nextRand() * 0.72;
-    dummy.scale.set(0.85 + nextRand() * 0.35, scaleH, 0.85 + nextRand() * 0.35);
+    const scaleH = 1.15 + nextRand() * 0.72;
+    const scaleW = 1.05 + nextRand() * 0.45;
+    dummy.scale.set(scaleW, scaleH, scaleW);
     dummy.updateMatrix();
     instancedGrass.setMatrixAt(placed, dummy.matrix);
     placed++;
@@ -2335,16 +2519,17 @@ export function buildAncientWorldScene(
     uSunDir: { value: new THREE.Vector3(0.0, 0.26, -0.96).normalize() },
   };
 
-  const skyGeo = new THREE.SphereGeometry(250, 48, 32);
+  const skyGeo = new THREE.SphereGeometry(1500, 32, 24);
   const skyMat = new THREE.ShaderMaterial({
     uniforms: skyUniforms,
     side: THREE.BackSide,
     depthWrite: false,
+    depthTest: false,
     vertexShader: /* glsl */ `
       varying vec3 vWorldDir;
       void main() {
+        vWorldDir = normalize(position.xyz);
         vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldDir = normalize(wp.xyz);
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -2385,18 +2570,15 @@ export function buildAncientWorldScene(
 
       void main() {
         vec3 dir = normalize(vWorldDir);
-        float elev = clamp(dir.y, 0.0, 1.0);
-
+        float elev = clamp(dir.y, -0.1, 1.0);
         vec3 sky = mix(uHorizonColor, uMidSkyColor, smoothstep(0.0, 0.28, elev));
         sky = mix(sky, uZenithColor, smoothstep(0.22, 0.85, elev));
 
-        // Mie solar corona & golden atmospheric halo
         float sunCos = max(dot(dir, normalize(uSunDir)), 0.0);
         float sunHalo = pow(sunCos, 8.0) * 0.48 + pow(sunCos, 64.0) * 0.85;
         float sunDisc = smoothstep(0.9965, 0.9992, sunCos);
         sky += uSunColor * (sunHalo + sunDisc * 1.8);
 
-        // High-altitude painterly cirrus & dusk clouds
         if (dir.y > 0.03) {
           vec2 uv = dir.xz / (dir.y + 0.18) * 1.45 + vec2(uTime * 0.012, -uTime * 0.006);
           float cNoise = fbm(uv);
@@ -2410,6 +2592,8 @@ export function buildAncientWorldScene(
     `,
   });
   const skyDome = new THREE.Mesh(skyGeo, skyMat);
+  skyDome.frustumCulled = false;
+  skyDome.renderOrder = -100;
   scene.add(skyDome);
 
   // 2. High-Contrast Cinematic Lighting Rig (Warm Golden Key Light vs Deep Indigo Rim/Ambient)
@@ -2432,13 +2616,14 @@ export function buildAncientWorldScene(
   }
   scene.add(dirLight);
 
-  // 3. Vast 320m x 320m Solid Walkable Valley & Climbable Himalayan Mountain Terrain Mesh
-  const terrainGeo = new THREE.PlaneGeometry(320, 320, 192, 192);
+  // 3. Vast 380m x 380m Solid Walkable Valley & Climbable Himalayan Mountain Terrain Mesh
+  const terrainGeo = new THREE.PlaneGeometry(380, 380, 200, 200);
   terrainGeo.rotateX(-Math.PI / 2);
   const posAttr = terrainGeo.attributes.position;
   const terrainColors = new Float32Array(posAttr.count * 3);
   const colValley = new THREE.Color(0xffffff);
-  const colGranite = new THREE.Color(0x526074);
+  const colHighlandMeadow = new THREE.Color(0xd9f99d);
+  const colGranite = new THREE.Color(0x576b5e);
   const colSnowPeak = new THREE.Color(0xe2e8f0);
   const colTmp = new THREE.Color();
 
@@ -2448,13 +2633,16 @@ export function buildAncientWorldScene(
     const vy = groundHeightAt(vx, vz);
     posAttr.setY(i, vy);
 
-    if (vy <= 2.4) {
+    if (vy <= 4.5) {
       colTmp.copy(colValley);
-    } else if (vy <= 12.5) {
-      const t = (vy - 2.4) / 10.1;
-      colTmp.copy(colValley).lerp(colGranite, t);
+    } else if (vy <= 10.5) {
+      const t = (vy - 4.5) / 6.0;
+      colTmp.copy(colValley).lerp(colHighlandMeadow, t);
+    } else if (vy <= 18.0) {
+      const t = (vy - 10.5) / 7.5;
+      colTmp.copy(colHighlandMeadow).lerp(colGranite, t);
     } else {
-      const t = Math.min(1, (vy - 12.5) / 11.5);
+      const t = Math.min(1, (vy - 18.0) / 10.0);
       colTmp.copy(colGranite).lerp(colSnowPeak, t);
     }
     terrainColors[i * 3] = colTmp.r;
@@ -2476,17 +2664,17 @@ export function buildAncientWorldScene(
   terrainMesh.receiveShadow = true;
   scene.add(terrainMesh);
 
-  // 4. Slender Wind-Swept Botanical Grass Shader Field + Instanced Golden Marigold & Lotus Wildflowers
+  // 4. Lush Wind-Swept Botanical Grass Shader Field + Instanced Golden Marigold & Lotus Wildflowers across Valley & Hills
   const windGrass = createZeldaWindGrassField(isSoftwareGl);
   scene.add(windGrass.mesh);
 
-  const flowerCount = isSoftwareGl ? 380 : 1100;
-  const flowerGeo = new THREE.SphereGeometry(0.11, 14, 10);
-  flowerGeo.scale(1.25, 0.55, 1.25);
+  const flowerCount = isSoftwareGl ? 680 : 2200;
+  const flowerGeo = new THREE.SphereGeometry(0.12, 14, 10);
+  flowerGeo.scale(1.3, 0.65, 1.3);
   const flowerMat = new THREE.MeshStandardMaterial({
     color: 0xf59e0b,
     emissive: 0xd97706,
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.48,
     roughness: 0.35,
   });
   const flowerMesh = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerCount);
@@ -2494,24 +2682,26 @@ export function buildAncientWorldScene(
   const flColor = new THREE.Color();
   for (let f = 0; f < flowerCount; f++) {
     const fa = ((f * 137.5) % 360) * (Math.PI / 180);
-    const fr = 6.2 + ((f * 29) % 62);
+    const fr = 6.2 + ((f * 37) % 122);
     const fx = Math.cos(fa) * fr;
     const fz = Math.sin(fa) * fr;
     if (Math.abs(fx) < 4.2 && fz > -44 && fz < 26) continue;
-    const fy = groundHeightAt(fx, fz) + 0.24 + (f % 3) * 0.08;
+    const fy = groundHeightAt(fx, fz) + 0.28 + (f % 3) * 0.08;
     flDummy.position.set(fx, fy, fz);
     flDummy.rotation.set(0.1, f * 0.7, 0.1);
-    flDummy.scale.setScalar(0.75 + (f % 4) * 0.22);
+    flDummy.scale.setScalar(0.82 + (f % 4) * 0.25);
     flDummy.updateMatrix();
     flowerMesh.setMatrixAt(f, flDummy.matrix);
-    flColor.setHex(f % 3 === 0 ? 0xf43f5e : f % 2 === 0 ? 0xfbbf24 : 0xf97316);
+    flColor.setHex(
+      f % 4 === 0 ? 0xf43f5e : f % 3 === 0 ? 0x38bdf8 : f % 2 === 0 ? 0xfbbf24 : 0xf97316
+    );
     flowerMesh.setColorAt(f, flColor);
   }
   flowerMesh.instanceMatrix.needsUpdate = true;
   if (flowerMesh.instanceColor) flowerMesh.instanceColor.needsUpdate = true;
   scene.add(flowerMesh);
 
-  // Smoothly Sculpted Mossy Temple Ruin Outcrops & Beveled Carved Stele Stones (Welded vertices + smooth normals!)
+  // Smoothly Sculpted Mossy Temple Ruin Outcrops & Beveled Carved Stele Stones across Valley & Hills
   const rawRockGeo = new THREE.SphereGeometry(0.84, 36, 28);
   const rPos = rawRockGeo.attributes.position;
   for (let i = 0; i < rPos.count; i++) {
@@ -2538,12 +2728,10 @@ export function buildAncientWorldScene(
     flatShading: false,
   });
 
-  const boulderCoords = [
-    [-8.5, 4.2, 1.0], [8.8, 3.8, 1.05], [-9.4, -8.5, 1.15], [9.6, -9.2, 1.1],
-    [-16.5, -14.0, 1.4], [16.8, -14.5, 1.35], [-14.2, 14.5, 1.25], [14.8, 14.2, 1.2],
-    [-28.0, -12.0, 1.6], [28.5, -12.0, 1.55], [-11.5, -34.0, 1.3], [11.5, -34.0, 1.3],
-  ];
-  for (const [bx, bz, bs] of boulderCoords) {
+  for (const b of BOULDER_OUTCROPS) {
+    const bx = b.x;
+    const bz = b.z;
+    const bs = b.scale;
     const by = groundHeightAt(bx, bz);
     const rockGrp = new THREE.Group();
     rockGrp.position.set(bx, by, bz);
@@ -2564,6 +2752,34 @@ export function buildAncientWorldScene(
     steleSlab.castShadow = true;
     rockGrp.add(mainRock, steleSlab);
     scene.add(rockGrp);
+  }
+
+  // 8 Ancient Highland Shrine Stupas & Beacon Pillars crowning the surrounding hills
+  const hillShrinePillarGeo = createHoysalaLathePillarGeometry(4.4);
+  const hillBeaconFlameGeo = createSculptedFlameGeometry(0.42, 1.05);
+  for (const hp of HILL_SHRINE_PILLARS) {
+    const hy = groundHeightAt(hp.x, hp.z);
+    const shrineGrp = new THREE.Group();
+    shrineGrp.position.set(hp.x, hy, hp.z);
+    shrineGrp.scale.setScalar(hp.scale);
+
+    const plinth = new THREE.Mesh(
+      new RoundedBoxGeometry(1.85, 0.65, 1.85, 4, 0.06),
+      darkStoneMat
+    );
+    plinth.position.y = 0.32;
+    const pillar = new THREE.Mesh(hillShrinePillarGeo, stoneMat);
+    pillar.position.y = 2.65;
+    pillar.castShadow = true;
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.36, 0.44, 32), goldMat);
+    bowl.position.y = 4.95;
+    const beaconFlame = new THREE.Mesh(
+      hillBeaconFlameGeo,
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    );
+    beaconFlame.position.y = 5.32;
+    shrineGrp.add(plinth, pillar, bowl, beaconFlame);
+    scene.add(shrineGrp);
   }
 
   // 5. Winding Saraswati River with Custom Water & Foam Shader + Carved Basalt-Gold Bridge + Sacred Lotus Pads
@@ -2643,12 +2859,12 @@ export function buildAncientWorldScene(
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
   });
-  const nsPathGeo = new THREE.PlaneGeometry(4.6, 98, 12, 80);
+  const nsPathGeo = new THREE.PlaneGeometry(4.6, 114, 12, 96);
   nsPathGeo.rotateX(-Math.PI / 2);
   const nsPos = nsPathGeo.attributes.position;
   for (let i = 0; i < nsPos.count; i++) {
     const px = nsPos.getX(i);
-    const pz = nsPos.getZ(i) - 10;
+    const pz = nsPos.getZ(i) + 2;
     nsPos.setZ(i, pz);
     nsPos.setY(i, groundHeightAt(px, pz) + 0.042);
   }
@@ -2923,29 +3139,37 @@ export function buildAncientWorldScene(
     if (visitedCount === lastRenderedHoloProjects) return;
     lastRenderedHoloProjects = visitedCount;
 
+    const isUnlocked = visitedCount >= 6;
     holoCtx.clearRect(0, 0, 1024, 384);
-    // Translucent Cyan-Obsidian Holographic Panel
+
+    // Translucent Cyan-Obsidian (Locked) OR Crimson-Gold (Unlocked Challenge Circle) Holographic Panel
     const bgGrad = holoCtx.createLinearGradient(0, 0, 0, 384);
-    bgGrad.addColorStop(0, 'rgba(4, 22, 42, 0.92)');
-    bgGrad.addColorStop(0.5, 'rgba(7, 36, 64, 0.95)');
-    bgGrad.addColorStop(1, 'rgba(4, 18, 36, 0.92)');
+    if (isUnlocked) {
+      bgGrad.addColorStop(0, 'rgba(42, 6, 18, 0.94)');
+      bgGrad.addColorStop(0.5, 'rgba(68, 10, 28, 0.96)');
+      bgGrad.addColorStop(1, 'rgba(36, 4, 14, 0.94)');
+    } else {
+      bgGrad.addColorStop(0, 'rgba(4, 22, 42, 0.92)');
+      bgGrad.addColorStop(0.5, 'rgba(7, 36, 64, 0.95)');
+      bgGrad.addColorStop(1, 'rgba(4, 18, 36, 0.92)');
+    }
     holoCtx.fillStyle = bgGrad;
     holoCtx.beginPath();
     holoCtx.roundRect(18, 18, 988, 348, 24);
     holoCtx.fill();
 
     // Holographic Scanlines
-    holoCtx.fillStyle = 'rgba(56, 189, 248, 0.07)';
+    holoCtx.fillStyle = isUnlocked ? 'rgba(251, 191, 36, 0.08)' : 'rgba(56, 189, 248, 0.07)';
     for (let y = 24; y < 360; y += 8) {
       holoCtx.fillRect(24, y, 976, 3);
     }
 
     // Glowing Dual Border
-    holoCtx.strokeStyle = '#38bdf8';
+    holoCtx.strokeStyle = isUnlocked ? '#fbbf24' : '#38bdf8';
     holoCtx.lineWidth = 5;
     holoCtx.stroke();
 
-    holoCtx.strokeStyle = 'rgba(254, 240, 138, 0.7)';
+    holoCtx.strokeStyle = isUnlocked ? 'rgba(244, 63, 94, 0.85)' : 'rgba(254, 240, 138, 0.7)';
     holoCtx.lineWidth = 2;
     holoCtx.strokeRect(34, 34, 956, 316);
 
@@ -2953,19 +3177,33 @@ export function buildAncientWorldScene(
     holoCtx.textAlign = 'center';
     holoCtx.textBaseline = 'middle';
     holoCtx.font = '700 24px monospace';
-    holoCtx.fillStyle = '#38bdf8';
-    holoCtx.fillText('🔒 NORTHERN CITADEL HOLOGRAM · LAYOFF BOSS SEALED', 512, 82);
+    holoCtx.fillStyle = isUnlocked ? '#fda4af' : '#38bdf8';
+    holoCtx.fillText(
+      isUnlocked
+        ? '⚔ ALL 6 PROJECTS SEEN · BOSS CHALLENGE CIRCLE UNLOCKED'
+        : '🔒 NORTHERN CITADEL HOLOGRAM · LAYOFF BOSS SEALED',
+      512,
+      82
+    );
 
     // Main Required Message
-    holoCtx.font = '800 36px sans-serif';
+    holoCtx.font = isUnlocked ? '800 33px sans-serif' : '800 36px sans-serif';
     holoCtx.fillStyle = '#fef08a';
-    holoCtx.fillText('Unlock fight after seeing all the projects', 512, 168);
+    holoCtx.fillText(
+      isUnlocked
+        ? 'Enter Circle & Press [E] or [B] to Challenge the Layoff Boss'
+        : 'Unlock fight after seeing all the projects',
+      512,
+      168
+    );
 
     // Subtitle & Progress Counter
     holoCtx.font = '700 20px monospace';
-    holoCtx.fillStyle = '#e0f2fe';
+    holoCtx.fillStyle = isUnlocked ? '#fde68a' : '#e0f2fe';
     holoCtx.fillText(
-      `PROJECTS SEEN: ${visitedCount} / 6   ·   VISIT ALL 6 SANCTUMS TO UNLOCK BOSS`,
+      isUnlocked
+        ? '⚡ [Z] SKY-LIGHTNING BOLT READY · CONFRONT THE SEVERANCE SOVEREIGN'
+        : `PROJECTS SEEN: ${visitedCount} / 6   ·   VISIT ALL 6 SANCTUMS TO UNLOCK BOSS`,
       512,
       242
     );
@@ -2977,16 +3215,22 @@ export function buildAncientWorldScene(
     const barH = 26;
     holoCtx.fillStyle = 'rgba(2, 10, 22, 0.9)';
     holoCtx.fillRect(barX, barY, barW, barH);
-    holoCtx.strokeStyle = '#38bdf8';
+    holoCtx.strokeStyle = isUnlocked ? '#fbbf24' : '#38bdf8';
     holoCtx.lineWidth = 2;
     holoCtx.strokeRect(barX, barY, barW, barH);
 
     const fillW = Math.round((Math.min(6, Math.max(0, visitedCount)) / 6) * (barW - 8));
     if (fillW > 0) {
       const barGrad = holoCtx.createLinearGradient(barX, 0, barX + barW, 0);
-      barGrad.addColorStop(0, '#0284c7');
-      barGrad.addColorStop(0.5, '#38bdf8');
-      barGrad.addColorStop(1, '#fef08a');
+      if (isUnlocked) {
+        barGrad.addColorStop(0, '#e11d48');
+        barGrad.addColorStop(0.5, '#f59e0b');
+        barGrad.addColorStop(1, '#fef08a');
+      } else {
+        barGrad.addColorStop(0, '#0284c7');
+        barGrad.addColorStop(0.5, '#38bdf8');
+        barGrad.addColorStop(1, '#fef08a');
+      }
       holoCtx.fillStyle = barGrad;
       holoCtx.fillRect(barX + 4, barY + 4, fillW, barH - 8);
     }
@@ -3012,110 +3256,194 @@ export function buildAncientWorldScene(
     bossDefeated: boolean,
     elapsed: number
   ) {
-    const shouldShowHologram = visitedCount < 6 && !bossAwakened && !bossDefeated;
+    // Show the hologram both when sealed (<6) AND when unlocked (>=6) until the player challenges & awakens the Boss!
+    const shouldShowHologram = !bossAwakened && !bossDefeated;
     bossLockHologramGroup.visible = shouldShowHologram;
     if (!shouldShowHologram) return;
 
     redrawBossLockHologramCanvas(visitedCount);
-    holoBaseRing.rotation.z = elapsed * 0.85;
-    holoGyroRing1.rotation.y = elapsed * 1.15;
-    holoGyroRing1.rotation.x = Math.sin(elapsed * 1.4) * 0.35;
-    holoGyroRing2.rotation.y = -elapsed * 1.45;
-    holoGyroRing2.rotation.z = Math.cos(elapsed * 1.2) * 0.42;
+    const isUnlocked = visitedCount >= 6;
+    holoCyanMat.color.setHex(isUnlocked ? 0xf43f5e : 0x38bdf8);
+    if (holoBeamCylinder.material instanceof THREE.MeshBasicMaterial) {
+      holoBeamCylinder.material.color.setHex(isUnlocked ? 0xf59e0b : 0x0ea5e9);
+      holoBeamCylinder.material.opacity = isUnlocked
+        ? 0.38 + Math.sin(elapsed * 6.0) * 0.15
+        : 0.16;
+      // Dramatic Sky-Beam Affordance: beam grows when all 6 project sanctums are awakened!
+      holoBeamCylinder.scale.set(isUnlocked ? 2.5 : 1, isUnlocked ? 8.0 : 1, isUnlocked ? 2.5 : 1);
+    }
+    holoBaseRing.rotation.z = elapsed * (isUnlocked ? 3.5 : 1.65);
+    holoBaseRing.scale.setScalar(isUnlocked ? 1.45 + Math.sin(elapsed * 8.5) * 0.15 : 1.0);
+    holoGyroRing1.rotation.y = elapsed * (isUnlocked ? 2.85 : 1.15);
+    holoGyroRing1.rotation.x = Math.sin(elapsed * 1.4) * (isUnlocked ? 0.65 : 0.35);
+    holoGyroRing2.rotation.y = -elapsed * (isUnlocked ? 3.2 : 1.45);
+    holoGyroRing2.rotation.z = Math.cos(elapsed * 1.2) * (isUnlocked ? 0.85 : 0.42);
     holoBillboardSprite.position.y = 3.35 + Math.sin(elapsed * 2.6) * 0.14;
   }
 
   scene.add(bossArenaGroup);
 
-  // 7. Sculpted Multi-Branching Sacred Banyan & Golden Flame-of-the-Forest Trees (Smooth Welded Botanical Canopies!)
-  const treeCoords = [
-    { x: -13.5, z: -2, s: 1.45, golden: false },
-    { x: 13.5, z: -2, s: 1.45, golden: true },
-    { x: -22, z: -26, s: 1.55, golden: true },
-    { x: 22, z: -26, s: 1.55, golden: false },
-    { x: -30, z: 4, s: 1.35, golden: false },
-    { x: 30, z: 4, s: 1.35, golden: true },
-    { x: -24, z: 36, s: 1.5, golden: true },
-    { x: 24, z: 36, s: 1.5, golden: false },
-    { x: -52, z: -4, s: 1.75, golden: false },
-    { x: 52, z: -4, s: 1.75, golden: true },
-    { x: -48, z: -36, s: 1.65, golden: true },
-    { x: 48, z: -36, s: 1.65, golden: false },
-    { x: -48, z: 38, s: 1.65, golden: false },
-    { x: 48, z: 38, s: 1.65, golden: true },
-    { x: -18, z: -56, s: 1.6, golden: true },
-    { x: 18, z: -56, s: 1.6, golden: false },
-  ];
-
+  // 7. Sculpted Multi-Branching Sacred Banyan, Golden Peepal & Highland Trees (True 3D Volumetric Botanical Foliage Domes + Wind Physics!)
   const trunkMat = new THREE.MeshPhysicalMaterial({
     color: 0x3b2314,
     bumpMap: sandstoneTex,
     bumpScale: 0.04,
-    roughness: 0.82,
-    clearcoat: 0.15,
+    roughness: 0.84,
+    clearcoat: 0.12,
     flatShading: false,
   });
   const canopyDeepMat = new THREE.MeshPhysicalMaterial({
-    color: 0x143820,
-    roughness: 0.72,
-    metalness: 0.04,
-    sheen: 0.55,
-    sheenColor: new THREE.Color(0x34d399),
-    clearcoat: 0.22,
-    flatShading: false,
-  });
-  const canopyJadeMat = new THREE.MeshPhysicalMaterial({
-    color: 0x245e32,
-    emissive: 0x0c2914,
-    emissiveIntensity: 0.16,
-    roughness: 0.68,
+    color: 0x12361e,
+    roughness: 0.58,
     metalness: 0.04,
     sheen: 0.65,
+    sheenColor: new THREE.Color(0x4ade80),
+    clearcoat: 0.22,
+    side: THREE.DoubleSide,
+  });
+  const canopyJadeMat = new THREE.MeshPhysicalMaterial({
+    color: 0x1f592e,
+    emissive: 0x0a2411,
+    emissiveIntensity: 0.16,
+    roughness: 0.52,
+    metalness: 0.04,
+    sheen: 0.72,
     sheenColor: new THREE.Color(0x86efac),
-    clearcoat: 0.28,
-    flatShading: false,
+    clearcoat: 0.26,
+    side: THREE.DoubleSide,
   });
-  const blossomGoldMat = new THREE.MeshPhysicalMaterial({
-    color: 0xd97706,
-    emissive: 0x92400e,
-    emissiveIntensity: 0.28,
-    roughness: 0.62,
+  const canopyOliveGoldMat = new THREE.MeshPhysicalMaterial({
+    color: 0xc2841a,
+    emissive: 0x5c3a08,
+    emissiveIntensity: 0.22,
+    roughness: 0.48,
     metalness: 0.06,
-    sheen: 0.75,
+    sheen: 0.78,
     sheenColor: new THREE.Color(0xfef08a),
-    clearcoat: 0.35,
-    flatShading: false,
+    clearcoat: 0.28,
+    side: THREE.DoubleSide,
   });
-  const blossomCrimsonMat = new THREE.MeshPhysicalMaterial({
-    color: 0xbe123c,
-    emissive: 0x881337,
-    emissiveIntensity: 0.26,
-    roughness: 0.62,
-    metalness: 0.06,
+  const canopySunlitEmeraldMat = new THREE.MeshPhysicalMaterial({
+    color: 0x34783b,
+    emissive: 0x133318,
+    emissiveIntensity: 0.18,
+    roughness: 0.5,
+    metalness: 0.04,
     sheen: 0.75,
-    sheenColor: new THREE.Color(0xfda4af),
-    clearcoat: 0.35,
-    flatShading: false,
+    sheenColor: new THREE.Color(0xbbf7d0),
+    clearcoat: 0.25,
+    side: THREE.DoubleSide,
   });
 
-  // Smoothly Sculpted Botanical Foliage Cloud Cluster (Indexed High-Resolution Sphere + Vertex Welding for Silky Normals!)
-  const rawFrondGeo = new THREE.SphereGeometry(0.86, 42, 32);
-  const fPos = rawFrondGeo.attributes.position;
-  for (let i = 0; i < fPos.count; i++) {
-    const fx = fPos.getX(i);
-    const fy = fPos.getY(i);
-    const fz = fPos.getZ(i);
-    const lobe =
-      1 +
-      0.21 * Math.sin(fx * 4.2 + fz * 3.6) * Math.cos(fy * 3.8) +
-      0.12 * Math.cos(fx * 6.4 - fy * 4.8);
-    fPos.setXYZ(i, fx * lobe * 1.28, fy * lobe * 0.68, fz * lobe * 1.18);
-  }
-  const frondGeo = BufferGeometryUtils.mergeVertices(rawFrondGeo, 1e-3);
-  frondGeo.computeVertexNormals();
+  // Build True 3D Volumetric Botanical Foliage Cluster Geometry:
+  // Combines 5 overlapping 3D-sculpted spherical/icosahedral foliage cloud lobes (full vertical Y thickness!)
+  // studded with 28 3D-pitched leaf blades oriented across all spherical latitudes (including vertical crown leaves)
+  // so the canopy looks lush, rounded, and deeply volumetric from BOTH ground level AND top-down hilltop views!
+  const singleLeafShape = new THREE.Shape();
+  singleLeafShape.moveTo(0, 0);
+  singleLeafShape.bezierCurveTo(0.28, 0.16, 0.38, 0.48, 0, 0.84);
+  singleLeafShape.bezierCurveTo(-0.38, 0.48, -0.28, 0.16, 0, 0);
+  const singleLeafGeo = new THREE.ExtrudeGeometry(singleLeafShape, {
+    steps: 2,
+    depth: 0.12,
+    bevelEnabled: true,
+    bevelThickness: 0.045,
+    bevelSize: 0.05,
+    bevelSegments: 2,
+    curveSegments: 10,
+  });
 
-  for (let tIdx = 0; tIdx < treeCoords.length; tIdx++) {
-    const tc = treeCoords[tIdx];
+  const volumetricLeafParts: THREE.BufferGeometry[] = [];
+
+  // 5 Overlapping 3D Sculpted Foliage Cloud Lobes (Center Crown + 4 Surrounding Volumetric Sub-Domes)
+  const lobeOffsets = [
+    { x: 0, y: 0.22, z: 0, sx: 1.15, sy: 1.05, sz: 1.15 }, // Larger crown
+    { x: 0.48, y: -0.06, z: 0.38, sx: 0.95, sy: 0.88, sz: 0.95 },
+    { x: -0.48, y: -0.04, z: 0.4, sx: 0.92, sy: 0.86, sz: 0.92 },
+    { x: 0.42, y: 0.04, z: -0.44, sx: 0.95, sy: 0.88, sz: 0.95 },
+    { x: -0.44, y: -0.06, z: -0.42, sx: 0.92, sy: 0.86, sz: 0.92 },
+  ];
+  for (const lobe of lobeOffsets) {
+    const rawCloud = new THREE.IcosahedronGeometry(0.72, 3); // Increased subdivision for smoothness
+    const cPos = rawCloud.attributes.position;
+    for (let i = 0; i < cPos.count; i++) {
+      const vx = cPos.getX(i);
+      const vy = cPos.getY(i);
+      const vz = cPos.getZ(i);
+      // More aggressive organic noise for "less bubblegum" and more "lush foliage" feel
+      const tuft =
+        1 +
+        0.22 * Math.sin(vx * 6.2 + vy * 5.4) * Math.cos(vz * 6.2) +
+        0.14 * Math.cos(vy * 7.5 - vx * 4.8) +
+        0.08 * Math.sin(vz * 12.0);
+      cPos.setXYZ(i, vx * tuft, vy * tuft, vz * tuft);
+    }
+
+    const cloud = rawCloud.index ? rawCloud.toNonIndexed() : rawCloud;
+    cloud.computeVertexNormals();
+
+    const m = new THREE.Matrix4();
+    m.makeScale(lobe.sx, lobe.sy, lobe.sz);
+    m.setPosition(lobe.x, lobe.y, lobe.z);
+    cloud.applyMatrix4(m);
+
+    // Strip all but position and normal
+    const toDelete: string[] = [];
+    for (const attr in cloud.attributes) {
+      if (attr !== 'position' && attr !== 'normal') toDelete.push(attr);
+    }
+    toDelete.forEach((a) => cloud.deleteAttribute(a));
+    volumetricLeafParts.push(cloud);
+  }
+
+  // 28 3D-Angled Botanical Leaves distributed across 3 spherical elevation bands (Lower Skirt, Mid Equatorial, Upper Vertical Crown)
+  for (let l = 0; l < 28; l++) {
+    const band = l < 12 ? 0 : l < 22 ? 1 : 2;
+    const countInBand = band === 0 ? 12 : band === 1 ? 10 : 6;
+    const idxInBand = band === 0 ? l : band === 1 ? l - 12 : l - 22;
+    const azimuth = (idxInBand / countInBand) * Math.PI * 2 + band * 0.45;
+    const pitchX = band === 0 ? 0.72 : band === 1 ? 0.42 : 0.16;
+    const radius = band === 0 ? 0.68 : band === 1 ? 0.52 : 0.24;
+    const heightY = band === 0 ? -0.14 : band === 1 ? 0.22 : 0.58;
+
+    const leaf = singleLeafGeo.index ? singleLeafGeo.toNonIndexed() : singleLeafGeo.clone();
+    leaf.computeVertexNormals();
+
+    const leafScale = band === 2 ? 1.15 : 1.32;
+    const m = new THREE.Matrix4();
+    const rot = new THREE.Euler(pitchX, azimuth, (l % 2 === 0 ? 1 : -1) * 0.24, 'YXZ');
+    const pos = new THREE.Vector3(
+      Math.sin(azimuth) * radius,
+      heightY + (l % 3) * 0.06,
+      Math.cos(azimuth) * radius
+    );
+    const quat = new THREE.Quaternion().setFromEuler(rot);
+    m.compose(pos, quat, new THREE.Vector3(leafScale, leafScale, leafScale));
+    leaf.applyMatrix4(m);
+
+    // Strip all but position and normal
+    const toDelete: string[] = [];
+    for (const attr in leaf.attributes) {
+      if (attr !== 'position' && attr !== 'normal') toDelete.push(attr);
+    }
+    toDelete.forEach((a) => leaf.deleteAttribute(a));
+    volumetricLeafParts.push(leaf);
+  }
+
+  const frondGeo = BufferGeometryUtils.mergeGeometries(volumetricLeafParts, false);
+  if (frondGeo) {
+    frondGeo.computeVertexNormals();
+  }
+
+  const swayingTreeCanopies: {
+    group: THREE.Group;
+    phase: number;
+    baseRotX: number;
+    baseRotZ: number;
+  }[] = [];
+
+  for (let tIdx = 0; tIdx < TREE_GROVE_POSITIONS.length; tIdx++) {
+    const tc = TREE_GROVE_POSITIONS[tIdx];
     const ty = groundHeightAt(tc.x, tc.z);
     const treeGrp = new THREE.Group();
     treeGrp.position.set(tc.x, ty, tc.z);
@@ -3124,87 +3452,106 @@ export function buildAncientWorldScene(
 
     // Gnarled curving main trunk via CatmullRomCurve3 + high-segment TubeGeometry
     const trunkCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, -0.1, 0),
-      new THREE.Vector3(0.14, 1.0, -0.08),
-      new THREE.Vector3(-0.1, 2.1, 0.12),
-      new THREE.Vector3(0.05, 3.1, 0.0),
+      new THREE.Vector3(0, -0.15, 0),
+      new THREE.Vector3(0.14, 1.05, -0.08),
+      new THREE.Vector3(-0.1, 2.25, 0.12),
+      new THREE.Vector3(0.04, 3.35, 0.0),
     ]);
     const trunkMesh = new THREE.Mesh(
-      new THREE.TubeGeometry(trunkCurve, 28, 0.36, 18, false),
+      new THREE.TubeGeometry(trunkCurve, 20, 0.38, 14, false),
       trunkMat
     );
     trunkMesh.castShadow = true;
+    trunkMesh.receiveShadow = true;
     treeGrp.add(trunkMesh);
 
-    // Flared Root Buttresses + Hanging Aerial Banyan Roots
+    const canopyWindGroup = new THREE.Group();
+    canopyWindGroup.position.set(0, 2.75, 0);
+    treeGrp.add(canopyWindGroup);
+    swayingTreeCanopies.push({
+      group: canopyWindGroup,
+      phase: tIdx * 0.85,
+      baseRotX: 0,
+      baseRotZ: 0,
+    });
+
+    // 5 Spreading Boughs + Hanging Aerial Roots + 3-Tier Volumetric Canopy Clusters
     for (let b = 0; b < 5; b++) {
       const ba = (b / 5) * Math.PI * 2;
       const bx = Math.cos(ba);
       const bz = Math.sin(ba);
 
-      // Spreading Bough
       const boughCurve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0, 2.5, 0),
-        new THREE.Vector3(bx * 1.15, 3.25 + (b % 2) * 0.25, bz * 1.15),
-        new THREE.Vector3(bx * 2.25, 3.65 + (b % 3) * 0.22, bz * 2.25),
+        new THREE.Vector3(0, -0.1, 0),
+        new THREE.Vector3(bx * 1.15, 0.68 + (b % 2) * 0.25, bz * 1.15),
+        new THREE.Vector3(bx * 2.15, 1.18 + (b % 3) * 0.22, bz * 2.15),
       ]);
       const bough = new THREE.Mesh(
-        new THREE.TubeGeometry(boughCurve, 20, 0.16, 14, false),
+        new THREE.TubeGeometry(boughCurve, 12, 0.15, 10, false),
         trunkMat
       );
       bough.castShadow = true;
-      treeGrp.add(bough);
+      canopyWindGroup.add(bough);
 
-      // Hanging Banyan Aerial Prop Root
-      const aerialRoot = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.055, 3.4, 16),
-        trunkMat
-      );
-      aerialRoot.position.set(bx * 1.55, 1.7, bz * 1.55);
-      aerialRoot.rotation.set(bz * 0.06, 0, -bx * 0.06);
-      treeGrp.add(aerialRoot);
+      // Hanging Banyan Aerial Prop Root on larger inner-valley trees
+      if (tIdx < 24 && b % 2 === 0) {
+        const aerialRoot = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.034, 0.055, 3.5, 10),
+          trunkMat
+        );
+        aerialRoot.position.set(bx * 1.5, 1.72, bz * 1.5);
+        aerialRoot.rotation.set(bz * 0.06, 0, -bx * 0.06);
+        treeGrp.add(aerialRoot);
+      }
 
-      // Layered Botanical Foliage Cloud Clusters along each bough
+      // 2 Volumetric Outer & Mid Foliage Domes along each bough (Full 3D Y-volume: scale.y >= 0.95!)
       for (let layer = 0; layer < 3; layer++) {
-        const dist = 1.2 + layer * 0.65;
+        const dist = 1.25 + layer * 0.82;
         const leafMat =
-          tc.golden && layer === 2
-            ? blossomGoldMat
-            : !tc.golden && layer === 2 && b % 2 === 0
-            ? blossomCrimsonMat
-            : layer === 1
+          tc.golden && layer === 1
+            ? canopyOliveGoldMat
+            : !tc.golden && layer === 1 && b % 2 === 0
+            ? canopySunlitEmeraldMat
+            : layer === 0
             ? canopyJadeMat
             : canopyDeepMat;
         const frond = new THREE.Mesh(frondGeo, leafMat);
         frond.position.set(
-          bx * dist + (layer - 1) * 0.28,
-          3.35 + layer * 0.38 + (b % 2) * 0.18,
-          bz * dist - (layer - 1) * 0.24
+          bx * dist,
+          0.95 + layer * 0.52 + (b % 2) * 0.18,
+          bz * dist
         );
         frond.rotation.set(
-          Math.sin(b + layer) * 0.22,
-          ba + layer * 0.8,
-          Math.cos(b - layer) * 0.18
+          Math.sin(b + layer) * 0.16,
+          ba + layer * 0.9,
+          Math.cos(b - layer) * 0.14
         );
-        const s = 1.15 - layer * 0.16;
-        frond.scale.set(s * 1.2, s * 0.85, s * 1.15);
+        const s = 1.12 - layer * 0.12;
+        frond.scale.set(s * 1.15, s * 1.02, s * 1.15);
         frond.castShadow = true;
-        treeGrp.add(frond);
+        frond.receiveShadow = true;
+        canopyWindGroup.add(frond);
       }
     }
 
-    // Central Crown Canopy Cluster
-    for (let top = 0; top < 4; top++) {
-      const ta = (top / 4) * Math.PI * 2;
+    // Tall Volumetric Upper Crown & Apex Dome (gives full 3D rounded height when viewed from hills/above!)
+    for (let top = 0; top < 3; top++) {
+      const ta = (top / 3) * Math.PI * 2;
+      const isApex = top === 2;
       const crownFrond = new THREE.Mesh(
         frondGeo,
-        tc.golden ? (top % 2 === 0 ? blossomGoldMat : canopyJadeMat) : canopyJadeMat
+        tc.golden ? (top % 2 === 0 ? canopyOliveGoldMat : canopyJadeMat) : canopySunlitEmeraldMat
       );
-      crownFrond.position.set(Math.cos(ta) * 0.55, 4.25 + top * 0.16, Math.sin(ta) * 0.55);
-      crownFrond.rotation.set(0.12, ta, -0.1);
-      crownFrond.scale.set(1.25, 0.9, 1.25);
+      crownFrond.position.set(
+        isApex ? 0 : Math.cos(ta) * 0.52,
+        isApex ? 2.35 : 1.75 + top * 0.24,
+        isApex ? 0 : Math.sin(ta) * 0.52
+      );
+      crownFrond.rotation.set(0.08, ta, -0.06);
+      crownFrond.scale.set(isApex ? 1.38 : 1.24, isApex ? 1.18 : 1.05, isApex ? 1.38 : 1.24);
       crownFrond.castShadow = true;
-      treeGrp.add(crownFrond);
+      crownFrond.receiveShadow = true;
+      canopyWindGroup.add(crownFrond);
     }
 
     scene.add(treeGrp);
@@ -3333,11 +3680,12 @@ export function buildAncientWorldScene(
     });
   }
 
-  // 10. Build 6 Roaming Asura Demons + Colossal September Layoff Boss
+  // 10. Build 6 Roaming Asura Demons + Territorial Perimeter Rings + Colossal September Layoff Boss
   const demons: DemonEntity[] = [];
   for (const dConf of INITIAL_DEMON_SPAWNS) {
     const demon = createDemonRig(dConf);
     scene.add(demon.group);
+    scene.add(demon.territoryRingMesh);
     demons.push(demon);
   }
 
@@ -3429,7 +3777,7 @@ export function buildAncientWorldScene(
     () => {}
   );
 
-  // 10B. Build Colossal 3D Sky-to-Ground "Indra Vajra" Lightning Bolt Super-Power Rig
+  // 10B. Build Colossal 3D Sky-to-Ground "Indra Vajra" Lightning Bolt Super-Power Rig (Zero-Lag Additive Meshes, No Dynamic PointLight Recompiles!)
   const lightningBoltGroup = new THREE.Group();
   lightningBoltGroup.visible = false;
   scene.add(lightningBoltGroup);
@@ -3465,11 +3813,11 @@ export function buildAncientWorldScene(
   });
 
   const mainBoltCore = new THREE.Mesh(
-    new THREE.TubeGeometry(mainBoltCurve, 48, 0.22, 12, false),
+    new THREE.TubeGeometry(mainBoltCurve, 32, 0.22, 10, false),
     boltCoreMat
   );
   const mainBoltAura = new THREE.Mesh(
-    new THREE.TubeGeometry(mainBoltCurve, 48, 0.56, 12, false),
+    new THREE.TubeGeometry(mainBoltCurve, 32, 0.56, 10, false),
     boltAuraMat
   );
   lightningBoltGroup.add(mainBoltCore, mainBoltAura);
@@ -3486,44 +3834,131 @@ export function buildAncientWorldScene(
       origin.clone().add(new THREE.Vector3(Math.cos(dirAngle - 0.2) * 4.8, -10.5, Math.sin(dirAngle - 0.2) * 4.8)),
     ]);
     const forkMesh = new THREE.Mesh(
-      new THREE.TubeGeometry(forkCurve, 20, 0.11, 8, false),
+      new THREE.TubeGeometry(forkCurve, 16, 0.11, 8, false),
       boltGoldMat
     );
     lightningBoltGroup.add(forkMesh);
   }
 
   const boltImpactRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.65, 3.8, 64).rotateX(-Math.PI / 2),
+    new THREE.RingGeometry(0.65, 3.8, 48).rotateX(-Math.PI / 2),
     boltGoldMat
   );
   boltImpactRing.position.y = 0.12;
   lightningBoltGroup.add(boltImpactRing);
 
+  const boltGroundFlashDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(5.5, 36).rotateX(-Math.PI / 2),
+    boltAuraMat
+  );
+  boltGroundFlashDisc.position.y = 0.08;
+  lightningBoltGroup.add(boltGroundFlashDisc);
+
   const boltSkyPillar = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.65, 2.2, 42, 32, 1, true),
+    new THREE.CylinderGeometry(0.65, 2.2, 42, 24, 1, true),
     boltAuraMat
   );
   boltSkyPillar.position.y = 21;
   lightningBoltGroup.add(boltSkyPillar);
 
-  let boltLight: THREE.PointLight | null = null;
-  if (!isSoftwareGl) {
-    boltLight = new THREE.PointLight(0x38bdf8, 0, 45);
-    boltLight.position.set(0, 4.0, 0);
-    lightningBoltGroup.add(boltLight);
-  }
-
   let lightningBoltTimer = 0;
   function triggerLightningBoltVisual(targetX: number, targetY: number, targetZ: number) {
     lightningBoltGroup.position.set(targetX, targetY, targetZ);
     lightningBoltGroup.visible = true;
-    lightningBoltTimer = 0.78;
+    lightningBoltTimer = 0.72;
     boltImpactRing.scale.setScalar(0.5);
-    if (boltLight) boltLight.intensity = 18;
-    particlePool.spawnBurst(targetX, targetY + 1.2, targetZ, 42, true);
+    boltGroundFlashDisc.scale.setScalar(1.0);
+    particlePool.spawnBurst(targetX, targetY + 1.2, targetZ, 28, true);
   }
 
-  // 11. Grounded Living World Companions & Wildlife (`RobotExpressive.glb`, `Fox.glb`, `Parrot.glb`, `Flamingo.glb`)
+  // 10C. Build the Grand Southern Recruiter & Opportunity Temple ("Sankalpa Mandapa" at (0, 54))
+  const recruiterTempleGroup = new THREE.Group();
+  const recPos = RECRUITER_TEMPLE_CONFIG.position;
+  const recBaseY = groundHeightAt(recPos.x, recPos.z);
+  recruiterTempleGroup.position.set(recPos.x, recBaseY, recPos.z);
+
+  const recStep1 = new THREE.Mesh(new THREE.CylinderGeometry(7.6, 8.2, 0.52, 64), darkStoneMat);
+  recStep1.position.y = 0.26;
+  recStep1.receiveShadow = true;
+  const recStepGold = new THREE.Mesh(new THREE.CylinderGeometry(6.8, 7.0, 0.14, 64), goldMat);
+  recStepGold.position.y = 0.56;
+  const recStep2 = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 6.6, 0.54, 64), stoneMat);
+  recStep2.position.y = 0.86;
+  recStep2.receiveShadow = true;
+  recruiterTempleGroup.add(recStep1, recStepGold, recStep2);
+
+  // Northern Ceremonial Staircase (-Z approach from the spawn plaza & stepwell)
+  for (let st = 0; st < 5; st++) {
+    const stepH = 0.21;
+    const stepY = (st + 0.5) * stepH;
+    const stepZ = -8.4 + st * 0.56;
+    const slab = new THREE.Mesh(
+      new RoundedBoxGeometry(3.4 - st * 0.08, stepH, 0.62, 4, 0.03),
+      st % 2 === 0 ? stoneMat : darkStoneMat
+    );
+    slab.position.set(0, stepY, stepZ);
+    slab.receiveShadow = true;
+    const edge = new THREE.Mesh(
+      new RoundedBoxGeometry(3.44 - st * 0.08, 0.04, 0.64, 3, 0.015),
+      goldMat
+    );
+    edge.position.set(0, stepY + stepH * 0.5, stepZ);
+    recruiterTempleGroup.add(slab, edge);
+  }
+
+  // 8 Hoysala Lathe Pillars supporting the Golden Sankalpa Vimana Dome
+  const recPillarGeo = createHoysalaLathePillarGeometry(4.2);
+  for (let p = 0; p < 8; p++) {
+    const a = (p / 8) * Math.PI * 2 + Math.PI / 8;
+    const col = new THREE.Mesh(recPillarGeo, stoneMat);
+    col.position.set(Math.cos(a) * 4.4, 3.15, Math.sin(a) * 4.4);
+    col.castShadow = true;
+    recruiterTempleGroup.add(col);
+  }
+
+  const recCornice = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.5, 0.42, 48), darkStoneMat);
+  recCornice.position.y = 5.35;
+  const recDome = new THREE.Mesh(
+    new THREE.SphereGeometry(4.3, 48, 32, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    goldMat
+  );
+  recDome.position.y = 5.45;
+  const recKalasha = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.45, 32), goldMat);
+  recKalasha.position.y = 10.2;
+  recruiterTempleGroup.add(recCornice, recDome, recKalasha);
+
+  // Central Golden Opportunity Dispatch Altar & Floating Scroll inside the Recruiter Temple
+  const recruiterAltarScroll = createFloatingScrollPedestal(stoneMat, goldMat, '#f59e0b');
+  recruiterAltarScroll.position.set(0, 1.08, 0);
+  recruiterAltarScroll.scale.setScalar(1.25);
+  recruiterTempleGroup.add(recruiterAltarScroll);
+
+  const recHaloRing = new THREE.Mesh(
+    new THREE.RingGeometry(8.2, 8.85, 64).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    })
+  );
+  recHaloRing.position.y = 0.08;
+  recruiterTempleGroup.add(recHaloRing);
+
+  const recSignSprite = createCorporateNameplateSprite(
+    '🏛️ TEMPLE OF OPPORTUNITIES',
+    'RECRUITER SANCTUM · PRESS [E] TO SEND OPPORTUNITY / MAIL',
+    0xf59e0b
+  );
+  recSignSprite.scale.set(5.4, 1.35, 1);
+  recSignSprite.position.set(0, 4.4, -5.2);
+  recruiterTempleGroup.add(recSignSprite);
+  scene.add(recruiterTempleGroup);
+
+  // 11. Grounded Living World Companions & Interactive "Hypo" Guide (`RobotExpressive.glb`, `Fox.glb`, `Parrot.glb`, `Flamingo.glb`)
   const ambientMixers: THREE.AnimationMixer[] = [];
   const soaringBirds: { group: THREE.Group; radius: number; speed: number; phase: number; height: number }[] = [];
   const spiritFoxes: {
@@ -3536,56 +3971,228 @@ export function buildAncientWorldScene(
   }[] = [];
   let hypoBotGroup: THREE.Group | null = null;
 
-  // Place "Hypo" (`RobotExpressive.glb`) at the 05. Hypo AI Agent Sanctum (-22.5, 18.8) where he belongs!
-  const hypoBaseX = -22.5;
-  const hypoBaseZ = 18.8;
+  // Stage Interactive "Hypo" Companion Guide right beside the player's starting Meru Lookout at (3.8, 5.4)!
+  const hypoBaseX = HYPO_GUIDE_CONFIG.position.x;
+  const hypoBaseZ = HYPO_GUIDE_CONFIG.position.z;
   const hypoFloorY = groundHeightAt(hypoBaseX, hypoBaseZ);
+
+  const hypoGuideGroup = new THREE.Group();
+  hypoGuideGroup.position.set(hypoBaseX, hypoFloorY, hypoBaseZ);
+  scene.add(hypoGuideGroup);
+
   const hypoPlinth = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.68, 0.82, 0.26, 36),
+    new THREE.CylinderGeometry(0.76, 0.92, 0.26, 36),
     darkStoneMat
   );
-  hypoPlinth.position.set(hypoBaseX, hypoFloorY + 0.13, hypoBaseZ);
+  hypoPlinth.position.set(0, 0.13, 0);
   hypoPlinth.receiveShadow = true;
-  scene.add(hypoPlinth);
+  hypoGuideGroup.add(hypoPlinth);
 
   const hypoHalo = new THREE.Mesh(
-    new THREE.RingGeometry(0.75, 0.92, 48).rotateX(-Math.PI / 2),
+    new THREE.RingGeometry(0.95, 1.22, 48).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({
-      color: 0xec4899,
+      color: 0x2dd4bf,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.82,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     })
   );
-  hypoHalo.position.set(hypoBaseX, hypoFloorY + 0.04, hypoBaseZ);
-  scene.add(hypoHalo);
+  hypoHalo.position.set(0, 0.05, 0);
+  hypoGuideGroup.add(hypoHalo);
 
-  gltfLoader.load(
-    'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
-    (gltf) => {
-      const bot = gltf.scene;
-      bot.scale.setScalar(0.36);
-      bot.position.set(hypoBaseX, hypoFloorY + 0.26, hypoBaseZ);
-      bot.rotation.y = 0.65;
-      scene.add(bot);
-      hypoBotGroup = bot as unknown as THREE.Group;
-
-      const mixer = new THREE.AnimationMixer(bot);
-      ambientMixers.push(mixer);
-      const waveClip =
-        THREE.AnimationClip.findByName(gltf.animations, 'Wave') ||
-        THREE.AnimationClip.findByName(gltf.animations, 'Standing') ||
-        gltf.animations[0];
-      if (waveClip) {
-        mixer.clipAction(waveClip).play();
-      }
-    },
-    undefined,
-    () => {}
+  // Cute Floating Speech Bubble above Hypo waving "Hi!"
+  const hypoBubbleSprite = createCorporateNameplateSprite(
+    '👋 HI! I’M HYPO — YOUR AI GUIDE!',
+    'PRESS [E] OR CLICK TO CHAT ABOUT AYUSH’S PORTFOLIO',
+    0x2dd4bf
   );
+  hypoBubbleSprite.scale.set(3.3, 0.82, 1);
+  hypoBubbleSprite.position.set(0, 2.38, 0);
+  hypoGuideGroup.add(hypoBubbleSprite);
+
+  // Studio-Grade High-Subdivision Artisan Porcelain & Brushed-Gold Teddy-Bot Companion ("Hypo")
+  // Replaces low-poly RobotExpressive.glb with ultra-smooth 64-segment ceramic & gold PBR surfaces!
+  const hypoArtisanRoot = new THREE.Group();
+  hypoArtisanRoot.position.set(0, 0.34, 0);
+  hypoArtisanRoot.rotation.y = -0.55;
+  hypoGuideGroup.add(hypoArtisanRoot);
+  hypoBotGroup = hypoArtisanRoot;
+
+  const hypoPorcelainMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    emissive: 0x0f292e,
+    emissiveIntensity: 0.15,
+    roughness: 0.05,
+    metalness: 0.12,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.01,
+    reflectivity: 1.0,
+    sheen: 1.0,
+    sheenColor: new THREE.Color(0xfef08a),
+    iridescence: 0.45,
+    iridescenceIOR: 1.6,
+    thickness: 0.8,
+  });
+  const hypoVisorGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x040d1a,
+    emissive: 0x06283d,
+    emissiveIntensity: 0.45,
+    roughness: 0.04,
+    metalness: 0.25,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.02,
+    ior: 1.8,
+  });
+  const hypoCyanGlowMat = new THREE.MeshBasicMaterial({
+    color: 0x2dd4bf,
+  });
+  const hypoWarmGoldGlowMat = new THREE.MeshBasicMaterial({
+    color: 0xfef08a,
+  });
+
+  // Rounded Teddy-Bot Torso & Gold Belt Collar
+  const hypoTorso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.32, 0.26, 32, 48),
+    hypoPorcelainMat
+  );
+  hypoTorso.position.y = 0.56;
+  hypoTorso.castShadow = true;
+  hypoTorso.receiveShadow = true;
+  hypoArtisanRoot.add(hypoTorso);
+
+  const hypoCollarRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.28, 0.042, 24, 64).rotateX(Math.PI / 2),
+    goldMat
+  );
+  hypoCollarRing.position.y = 0.86;
+  hypoArtisanRoot.add(hypoCollarRing);
+
+  // Glowing Turquoise Prana Core Badge on Hypo's Chest
+  const hypoChestCore = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.11, 0.04, 36).rotateX(Math.PI / 2),
+    hypoCyanGlowMat
+  );
+  hypoChestCore.position.set(0, 0.58, 0.31);
+  const hypoChestGoldRim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.115, 0.018, 20, 48),
+    goldMat
+  );
+  hypoChestGoldRim.position.set(0, 0.58, 0.32);
+  hypoArtisanRoot.add(hypoChestCore, hypoChestGoldRim);
+
+  // Smooth High-Subdivision Teddy-Bot Head
+  const hypoHeadGroup = new THREE.Group();
+  hypoHeadGroup.position.set(0, 1.24, 0);
+  hypoArtisanRoot.add(hypoHeadGroup);
+
+  const hypoHeadSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.36, 128, 96),
+    hypoPorcelainMat
+  );
+  hypoHeadSphere.scale.set(1.08, 0.96, 0.98);
+  hypoHeadSphere.castShadow = true;
+  hypoHeadGroup.add(hypoHeadSphere);
+
+  // Cushioned Brushed-Gold Teddy Ears with Glowing Cyan Inner Acoustic Rings
+  for (const earSide of [-1, 1]) {
+    const earGroup = new THREE.Group();
+    earGroup.position.set(earSide * 0.29, 0.28, -0.02);
+    earGroup.rotation.z = -earSide * 0.38;
+
+    const outerEar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.13, 0.09, 36).rotateX(Math.PI / 2),
+      goldMat
+    );
+    const innerEarGlow = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.075, 0.075, 0.096, 32).rotateX(Math.PI / 2),
+      hypoCyanGlowMat
+    );
+    earGroup.add(outerEar, innerEarGlow);
+    hypoHeadGroup.add(earGroup);
+  }
+
+  // Sleek Curved Obsidian Smart Visor Dome across the front face
+  const hypoVisor = new THREE.Mesh(
+    new THREE.SphereGeometry(
+      0.345,
+      48,
+      32,
+      Math.PI * 0.22,
+      Math.PI * 0.56,
+      Math.PI * 0.32,
+      Math.PI * 0.36
+    ),
+    hypoVisorGlassMat
+  );
+  hypoVisor.rotation.y = -Math.PI * 0.5;
+  hypoVisor.scale.set(1.09, 0.97, 1.02);
+  hypoHeadGroup.add(hypoVisor);
+
+  // Expressive Glowing Cyan LED Eyes + Happy Smile Arc inside the Visor
+  const hypoLeftEye = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.036, 0.045, 16, 24),
+    hypoCyanGlowMat
+  );
+  hypoLeftEye.position.set(-0.115, 0.03, 0.335);
+  const hypoRightEye = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.036, 0.045, 16, 24),
+    hypoCyanGlowMat
+  );
+  hypoRightEye.position.set(0.115, 0.03, 0.335);
+  const hypoSmileArc = new THREE.Mesh(
+    new THREE.TorusGeometry(0.055, 0.012, 16, 32, Math.PI).rotateZ(Math.PI),
+    hypoWarmGoldGlowMat
+  );
+  hypoSmileArc.position.set(0, -0.045, 0.338);
+  hypoHeadGroup.add(hypoLeftEye, hypoRightEye, hypoSmileArc);
+
+  // Floating Golden Crown Halo above Hypo's Head
+  const hypoCrownHalo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.22, 0.018, 20, 48).rotateX(Math.PI / 2),
+    goldMat
+  );
+  hypoCrownHalo.position.set(0, 0.44, 0);
+  hypoHeadGroup.add(hypoCrownHalo);
+
+  // Articulated Porcelain & Gold Arms (Right Arm waves enthusiastically!)
+  const hypoLeftArm = new THREE.Group();
+  hypoLeftArm.position.set(-0.38, 0.72, 0);
+  const leftPaw = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.075, 0.2, 24, 32),
+    hypoPorcelainMat
+  );
+  leftPaw.position.y = -0.12;
+  const leftCuff = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.018, 16, 32).rotateX(Math.PI / 2), goldMat);
+  leftCuff.position.y = -0.02;
+  hypoLeftArm.add(leftPaw, leftCuff);
+  hypoLeftArm.rotation.z = 0.28;
+  hypoArtisanRoot.add(hypoLeftArm);
+
+  const hypoRightArm = new THREE.Group();
+  hypoRightArm.position.set(0.38, 0.74, 0);
+  const rightPaw = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.075, 0.2, 24, 32),
+    hypoPorcelainMat
+  );
+  rightPaw.position.y = 0.14;
+  const rightCuff = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.018, 16, 32).rotateX(Math.PI / 2), goldMat);
+  rightCuff.position.y = 0.04;
+  hypoRightArm.add(rightPaw, rightCuff);
+  hypoRightArm.rotation.z = -0.55;
+  hypoArtisanRoot.add(hypoRightArm);
+
+  // Cushioned Gold-Rimmed Feet
+  for (const footSide of [-1, 1]) {
+    const foot = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.088, 0.12, 24, 32),
+      goldMat
+    );
+    foot.position.set(footSide * 0.15, 0.14, 0.03);
+    hypoArtisanRoot.add(foot);
+  }
 
   // Load Golden Spirit Foxes (`Fox.glb`) on flat emerald meadows with exact ground contact & tangent heading!
   gltfLoader.load(
@@ -3890,25 +4497,33 @@ export function buildAncientWorldScene(
     comboStage: 1 | 2 | 3 = 1,
     isDashing = false
   ) {
-    // 1. Update Atmospheric Sky Shader, Wind-Swept Grass, River Water, Silk Banners, Lantern Flames & Fireflies
+    // 1. Keep Sky Dome centered on the Player so hill climbs never reach the sky sphere boundary!
+    skyDome.position.set(playerRig.group.position.x, playerRig.group.position.y * 0.5, playerRig.group.position.z);
     skyUniforms.uTime.value = elapsed;
     windGrass.uniforms.uTime.value = elapsed;
     zeldaRiver.uniforms.uTime.value = elapsed;
 
-    // Animate 3D Sky-to-Ground Indra Vajra Lightning Bolt when active
+    // Physical Wind-Gust Sway on Botanical Tree Canopies
+    for (let tc = 0; tc < swayingTreeCanopies.length; tc++) {
+      const c = swayingTreeCanopies[tc];
+      const gust = Math.sin(elapsed * 1.75 + c.phase) + 0.45 * Math.cos(elapsed * 2.9 + c.phase * 1.7);
+      c.group.rotation.z = gust * 0.042;
+      c.group.rotation.x = Math.cos(elapsed * 1.45 + c.phase) * 0.032;
+    }
+
+    // Animate 3D Sky-to-Ground Indra Vajra Lightning Bolt when active (Zero-Lag Additive Meshes)
     if (lightningBoltTimer > 0) {
       lightningBoltTimer = Math.max(0, lightningBoltTimer - dt);
-      const lifePct = lightningBoltTimer / 0.78;
+      const lifePct = lightningBoltTimer / 0.72;
       lightningBoltGroup.rotation.y = Math.sin(elapsed * 90) * 0.35;
       mainBoltCore.scale.set(0.8 + Math.sin(elapsed * 120) * 0.35, 1, 0.8 + Math.cos(elapsed * 120) * 0.35);
       boltCoreMat.opacity = Math.min(1, lifePct * 1.4);
       boltAuraMat.opacity = lifePct * 0.75;
       boltGoldMat.opacity = lifePct * 0.9;
-      boltImpactRing.scale.setScalar(0.6 + (1 - lifePct) * 3.2);
-      if (boltLight) boltLight.intensity = lifePct * 22;
+      boltImpactRing.scale.setScalar(0.6 + (1 - lifePct) * 3.4);
+      boltGroundFlashDisc.scale.setScalar(0.8 + (1 - lifePct) * 2.2);
       if (lightningBoltTimer <= 0) {
         lightningBoltGroup.visible = false;
-        if (boltLight) boltLight.intensity = 0;
       }
     }
 
@@ -3942,45 +4557,90 @@ export function buildAncientWorldScene(
     const damp = (cur: number, target: number, lambda: number) =>
       THREE.MathUtils.lerp(cur, target, 1 - Math.exp(-lambda * Math.max(0.001, dt)));
 
-    // 2. Update Player Skeletal Animation Mixer & Lock Weapon Hilt Directly Into Right Hand Palm!
+    // 2. Update Player Skeletal Animation Mixer & Lock Weapon Hilt Directly Into Right Hand Palm (Zero Allocation!)
     if (playerRig.mixer) {
-      const animState: 'idle' | 'walk' | 'run' =
-        playerMoveSpeed > 9.0 ? 'run' : playerMoveSpeed > 0.3 ? 'walk' : 'idle';
-      const clipSpeed =
-        animState === 'run'
-          ? Math.max(0.95, playerMoveSpeed / 11.0)
-          : animState === 'walk'
-          ? Math.max(0.85, playerMoveSpeed / 6.2)
-          : 1.0;
+      // When gliding in mid-air, freeze the leg gait into the calm idle pose instead of running in mid-air!
+      const animState: 'idle' | 'walk' | 'run' = isGliding
+        ? 'idle'
+        : playerMoveSpeed > 9.0
+        ? 'run'
+        : playerMoveSpeed > 0.3
+        ? 'walk'
+        : 'idle';
+      
+      // For authentic gliding, we use the idle clip but freeze it at a neutral streamlined pose
+      const clipSpeed = isGliding
+        ? 0
+        : animState === 'run'
+        ? Math.max(0.95, playerMoveSpeed / 11.0)
+        : animState === 'walk'
+        ? Math.max(0.85, playerMoveSpeed / 6.2)
+        : 1.0;
+      
       playerRig.setAnimationState(animState, clipSpeed);
+      
+      if (isGliding && playerRig.actions.idle) {
+        // Seek to a streamlined mid-air frame in the idle loop
+        playerRig.actions.idle.time = 0.45;
+      }
+
       playerRig.mixer.update(dt);
 
-      // Sample exact 3D palm center of Soldier.glb's rightHandBone after mixer update
       if (playerRig.glbRoot && playerRig.rightHandBone) {
         playerRig.glbRoot.updateMatrixWorld(true);
-        const palmWorld = new THREE.Vector3(0, 0.06, 0.02);
-        playerRig.rightHandBone.localToWorld(palmWorld);
-        playerRig.bodyGroup.worldToLocal(palmWorld);
-        playerRig.weaponArmPivot.position.copy(palmWorld);
+        _palmVec.set(0, 0.06, 0.02);
+        playerRig.rightHandBone.localToWorld(_palmVec);
+        playerRig.bodyGroup.worldToLocal(_palmVec);
+        playerRig.weaponArmPivot.position.copy(_palmVec);
         playerRig.elbowJoint.position.set(0, 0, 0);
         playerRig.wristGrip.position.set(0, 0, 0);
       }
-      if (playerRig.glbRoot && playerRig.leftHandBone) {
-        const leftPalmWorld = new THREE.Vector3(0, 0.06, 0.02);
-        playerRig.leftHandBone.localToWorld(leftPalmWorld);
-        playerRig.bodyGroup.worldToLocal(leftPalmWorld);
-        playerRig.offhandArmPivot.position.copy(leftPalmWorld);
+      if (playerRig.glbRoot && playerRig.leftHandBone && playerRig.offhandArmPivot.visible) {
+        _palmVec.set(0, 0.06, 0.02);
+        playerRig.leftHandBone.localToWorld(_palmVec);
+        playerRig.bodyGroup.worldToLocal(_palmVec);
+        playerRig.offhandArmPivot.position.copy(_palmVec);
       }
     }
 
-    // Update Corporate Asuras & Layoff Boss hand-locked weapon positions
+    // Update Corporate Asuras & Layoff Boss hand-locked weapon positions (only for nearby active demons to eliminate lag!)
+    const pxNow = playerRig.group.position.x;
+    const pzNow = playerRig.group.position.z;
     for (const demon of demons) {
-      if (!demon.alive || !demon.rightHandBone) continue;
+      if (!demon.alive) {
+        if (demon.dyingTimer > 0) {
+          demon.dyingTimer -= dt;
+          const t = 1 - Math.max(0, demon.dyingTimer) / 1.25;
+          // Cinematic Vanishing Vortex: Scale down and spiral into the void
+          demon.bodyGroup.scale.setScalar(demon.scale * (1 - t));
+          demon.bodyGroup.rotation.y += dt * 12;
+          demon.bodyGroup.position.y -= dt * 0.8;
+          
+          demon.deathVortexMesh.rotation.y -= dt * 10;
+          demon.deathVortexMesh.scale.setScalar(0.4 + t * 2.6);
+          if (demon.deathVortexMesh.material instanceof THREE.MeshBasicMaterial) {
+            demon.deathVortexMesh.material.opacity = Math.pow(Math.sin(t * Math.PI), 0.7) * 0.9;
+          }
+
+          // Spawn a final burst of spirit particles as they fully dissolve
+          if (t > 0.8 && t < 0.85) {
+            particlePool.spawnBurst(demon.x, demon.y + 1.5, demon.z, 15, false);
+          }
+          
+          if (demon.dyingTimer <= 0) {
+            demon.group.visible = false;
+          }
+        }
+        continue;
+      }
+      if (!demon.rightHandBone) continue;
+      const distSq = (demon.x - pxNow) * (demon.x - pxNow) + (demon.z - pzNow) * (demon.z - pzNow);
+      if (distSq > 26 * 26) continue;
       demon.bodyGroup.updateMatrixWorld(true);
-      const dPalm = new THREE.Vector3(0, 0.06, 0);
-      demon.rightHandBone.localToWorld(dPalm);
-      demon.bodyGroup.worldToLocal(dPalm);
-      demon.weaponGroup.position.copy(dPalm);
+      _palmVec.set(0, 0.06, 0);
+      demon.rightHandBone.localToWorld(_palmVec);
+      demon.bodyGroup.worldToLocal(_palmVec);
+      demon.weaponGroup.position.copy(_palmVec);
       if (demon.state === 'windup') {
         demon.weaponGroup.rotation.set(-0.65, 0.2, -0.35);
       } else if (demon.state === 'strike') {
@@ -3993,16 +4653,16 @@ export function buildAncientWorldScene(
     if (layoffBoss.awakened && !layoffBoss.defeated) {
       layoffBoss.bodyGroup.updateMatrixWorld(true);
       if (layoffBoss.rightHandBone) {
-        const rPalm = new THREE.Vector3(0, 0.08, 0);
-        layoffBoss.rightHandBone.localToWorld(rPalm);
-        layoffBoss.bodyGroup.worldToLocal(rPalm);
-        layoffBoss.rightWeaponGroup.position.copy(rPalm);
+        _palmVec.set(0, 0.08, 0);
+        layoffBoss.rightHandBone.localToWorld(_palmVec);
+        layoffBoss.bodyGroup.worldToLocal(_palmVec);
+        layoffBoss.rightWeaponGroup.position.copy(_palmVec);
       }
       if (layoffBoss.leftHandBone) {
-        const lPalm = new THREE.Vector3(0, 0.08, 0);
-        layoffBoss.leftHandBone.localToWorld(lPalm);
-        layoffBoss.bodyGroup.worldToLocal(lPalm);
-        layoffBoss.leftWeaponGroup.position.copy(lPalm);
+        _palmVec.set(0, 0.08, 0);
+        layoffBoss.leftHandBone.localToWorld(_palmVec);
+        layoffBoss.bodyGroup.worldToLocal(_palmVec);
+        layoffBoss.leftWeaponGroup.position.copy(_palmVec);
       }
     }
 
@@ -4014,7 +4674,12 @@ export function buildAncientWorldScene(
 
     playerRig.paragliderGroup.visible = isGliding;
     if (isGliding) {
-      playerRig.paragliderGroup.rotation.z = Math.sin(elapsed * 4.5) * 0.06;
+      playerRig.paragliderGroup.rotation.z = Math.sin(elapsed * 4.2) * 0.07;
+      playerRig.paragliderGroup.position.y = 1.48 + Math.sin(elapsed * 6.0) * 0.03;
+      // Apply a mythic "leaning into the wind" tilt to the entire character mesh during high-speed gliding
+      playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, -0.45, 6.5);
+    } else {
+      playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, 0, 8.5);
     }
 
     if (playerRig.parryShieldMesh.material instanceof THREE.MeshBasicMaterial) {
@@ -4025,7 +4690,7 @@ export function buildAncientWorldScene(
       );
     }
 
-    // Orient the hand-locked weapon FORWARD (+Z in bodyGroup space, positive X pitch!) during attacks, parries, and movement
+    // Orient the hand-locked weapon FORWARD (+Z in bodyGroup space, positive X pitch!) during attacks, parries, gliding, and movement
     if (attackProgress > 0) {
       const sinSwing = Math.sin(attackProgress * Math.PI);
       const easeSwing = 1 - Math.pow(1 - attackProgress, 2.2);
@@ -4113,6 +4778,32 @@ export function buildAncientWorldScene(
       if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
         playerRig.comboSlashRing.material.opacity = 0;
       }
+    } else if (isGliding) {
+      // Authentic Garuda Aerial Gliding Posture:
+      // Forward aerodynamic pitch (+0.38 rad), gentle wind bank, and swept-wing blade balance!
+      const glideSway = Math.sin(elapsed * 3.4) * 0.05;
+      playerRig.bodyGroup.rotation.y = damp(playerRig.bodyGroup.rotation.y, glideSway, 12);
+      playerRig.bodyGroup.rotation.x = damp(playerRig.bodyGroup.rotation.x, 0.38, 12);
+
+      playerRig.weaponArmPivot.rotation.set(
+        damp(playerRig.weaponArmPivot.rotation.x, 0.52, 14),
+        damp(playerRig.weaponArmPivot.rotation.y, -0.62, 14),
+        damp(playerRig.weaponArmPivot.rotation.z, 0.58, 14)
+      );
+      playerRig.elbowJoint.rotation.set(0, 0, 0);
+      playerRig.wristGrip.rotation.set(0, 0, 0);
+      playerRig.offhandArmPivot.rotation.set(
+        damp(playerRig.offhandArmPivot.rotation.x, 0.52, 14),
+        damp(playerRig.offhandArmPivot.rotation.y, 0.62, 14),
+        damp(playerRig.offhandArmPivot.rotation.z, -0.58, 14)
+      );
+
+      if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
+        playerRig.slashArcMesh.material.opacity = 0;
+      }
+      if (playerRig.comboSlashRing.material instanceof THREE.MeshBasicMaterial) {
+        playerRig.comboSlashRing.material.opacity = 0;
+      }
     } else {
       // Natural Right-Handed Swordsman Ready Grip:
       // Hilt held in right hand at right hip; POSITIVE X rotation (+1.02 rad) pitches the blade FORWARD (+Z) and upward (+Y) in front of the character!
@@ -4153,18 +4844,35 @@ export function buildAncientWorldScene(
       }
     }
 
-    // 3. Update Grounded Ambient Companions (Hypo Astro-Bot, Grounded Spirit Foxes, Soaring Birds)
+    // 3. Update Grounded Ambient Companions (Artisan Hypo Teddy-Bot, Grounded Spirit Foxes, Soaring Birds)
     for (const m of ambientMixers) {
       m.update(dt);
     }
 
     if (hypoBotGroup) {
-      hypoBotGroup.position.y = hypoFloorY + 0.26;
+      hypoBotGroup.position.y = 0.28 + Math.sin(elapsed * 2.8) * 0.05;
       const dxToPlayer = playerRig.group.position.x - hypoBaseX;
       const dzToPlayer = playerRig.group.position.z - hypoBaseZ;
       const targetYaw = Math.atan2(dxToPlayer, dzToPlayer);
       hypoBotGroup.rotation.y = targetYaw;
+      // Smooth friendly wave on Hypo's right arm + gentle head nod + occasional eye blink
+      hypoRightArm.rotation.z = -2.25 + Math.sin(elapsed * 5.2) * 0.32;
+      hypoLeftArm.rotation.z = 0.28 + Math.cos(elapsed * 2.6) * 0.08;
+      hypoHeadGroup.rotation.z = Math.sin(elapsed * 2.1) * 0.06;
+      hypoCrownHalo.rotation.z = elapsed * 1.8;
+      const isBlinking = Math.sin(elapsed * 1.7) > 0.96;
+      hypoLeftEye.scale.y = isBlinking ? 0.12 : 1.0;
+      hypoRightEye.scale.y = isBlinking ? 0.12 : 1.0;
     }
+    hypoHalo.rotation.z = elapsed * 0.95;
+    hypoBubbleSprite.position.y = 2.42 + Math.sin(elapsed * 2.8) * 0.08;
+
+    const recScrollObj = recruiterAltarScroll.getObjectByName('FloatingScrollObject');
+    if (recScrollObj) {
+      recScrollObj.position.y = 1.68 + Math.sin(elapsed * 2.5) * 0.14;
+      recScrollObj.rotation.y = elapsed * 1.25;
+    }
+    recHaloRing.rotation.z = -elapsed * 0.45;
 
     for (const fox of spiritFoxes) {
       const angularSpeed = 0.36;
@@ -4256,6 +4964,9 @@ export function buildAncientWorldScene(
     monumentRigs,
     relicRigs,
     weaponForgeRigs,
+    recruiterTempleGroup,
+    hypoGuideGroup,
+    bossLockHologramGroup,
     demons,
     layoffBoss,
     cameraBlockers,

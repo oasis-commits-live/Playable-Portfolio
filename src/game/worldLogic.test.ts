@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import {
   groundHeightAt,
   walkableSurfaceHeightAt,
+  isOnStoneSurfaceAt,
+  isNearRecruiterTemple,
+  isNearHypoGuide,
+  isInsideBossChallengeCircle,
   applyRadialDeadzone,
   computeMovementVector,
   computeParagliderPhysics,
@@ -31,20 +35,30 @@ import {
   PARAGLIDE_TERMINAL_VY,
   WORLD_RADIUS,
 } from './worldLogic';
-import { PORTFOLIO_STOPS, LOTUS_RELICS, FORGE_WEAPONS } from '../data/portfolioStops';
+import {
+  PORTFOLIO_STOPS,
+  LOTUS_RELICS,
+  FORGE_WEAPONS,
+  INITIAL_DEMON_SPAWNS,
+  RECRUITER_TEMPLE_CONFIG,
+  HYPO_GUIDE_CONFIG,
+} from '../data/portfolioStops';
 
-test('groundHeightAt keeps central path walkable, elevates northern mound, and rises on walkable mountain peaks', () => {
+test('groundHeightAt keeps central path walkable, elevates northern mound & southern temple, and rises on outer mountain peaks', () => {
   const spawnY = groundHeightAt(0, 8);
   assert.ok(Math.abs(spawnY) < 0.05, 'Spawn lookout terrace path should be near y = 0');
 
   const northMoundY = groundHeightAt(0, -26);
   assert.ok(northMoundY > 1.2, 'Northern Sovereign Mandapa sits on an elevated hillock');
 
-  const outerMountainY = groundHeightAt(98, 0);
-  assert.ok(outerMountainY > 10.0, 'Outer mountain peaks beyond 56m should form tall climbable mountains');
+  const southTempleY = groundHeightAt(0, 54);
+  assert.ok(southTempleY > 1.0, 'Southern Recruiter Opportunity Temple sits on an elevated sanctuary terrace');
+
+  const outerMountainY = groundHeightAt(118, 0);
+  assert.ok(outerMountainY > 10.0, 'Outer mountain peaks beyond 72m should form tall climbable mountains');
 });
 
-test('walkableSurfaceHeightAt elevates player onto monument plinths, bridge deck, weapon forges, and boulders', () => {
+test('walkableSurfaceHeightAt elevates player onto monument plinths, bridge deck, southern recruiter temple, and weapon forges', () => {
   // Saraswati Bridge center at (0, -3.5) should be elevated above river ground
   const bridgeTerrainY = groundHeightAt(0, -3.5);
   const bridgeDeckY = walkableSurfaceHeightAt(0, -3.5);
@@ -58,11 +72,31 @@ test('walkableSurfaceHeightAt elevates player onto monument plinths, bridge deck
     'Walking onto upper monument Jagati plinth should elevate player by +1.0m instead of clipping through'
   );
 
+  // Southern Recruiter Temple altar at (0, 54)
+  const templeGround = groundHeightAt(0, 54);
+  const templeAltarY = walkableSurfaceHeightAt(0, 54);
+  assert.ok(templeAltarY >= templeGround + 1.0, 'Southern Recruiter Temple dais should elevate player');
+
   // Weapon Forge platform at FORGE_WEAPONS[0]
   const w0 = FORGE_WEAPONS[0];
   const forgeGround = groundHeightAt(w0.position.x, w0.position.z);
   const forgeSurfaceY = walkableSurfaceHeightAt(w0.position.x, w0.position.z);
   assert.ok(forgeSurfaceY >= forgeGround + 0.5, 'Weapon forge anvil platform should elevate player');
+});
+
+test('isOnStoneSurfaceAt, isNearRecruiterTemple, isNearHypoGuide, and isInsideBossChallengeCircle detect zones accurately', () => {
+  assert.equal(isOnStoneSurfaceAt(0, 8), true, 'Central stone promenade should be detected as stone');
+  assert.equal(isOnStoneSurfaceAt(0, 54), true, 'Southern Recruiter Temple should be detected as stone');
+  assert.equal(isOnStoneSurfaceAt(20, 20), false, 'Outer meadow should be detected as grass');
+
+  assert.equal(isNearRecruiterTemple(RECRUITER_TEMPLE_CONFIG.position).inRange, true);
+  assert.equal(isNearRecruiterTemple({ x: 0, z: 8 }).inRange, false);
+
+  assert.equal(isNearHypoGuide(HYPO_GUIDE_CONFIG.position).inRange, true);
+  assert.equal(isNearHypoGuide({ x: 0, z: -25 }).inRange, false);
+
+  assert.equal(isInsideBossChallengeCircle({ x: 0, z: -45.8 }).inRange, true);
+  assert.equal(isInsideBossChallengeCircle({ x: 0, z: 8 }).inRange, false);
 });
 
 test('applyRadialDeadzone zeroes small stick drift and scales full deflection smoothly', () => {
@@ -113,34 +147,61 @@ test('resolveSekiroDeflect negates HP damage and deals posture counter-damage on
   assert.equal(missed.enemyPostureDamageDealt, 0);
 });
 
-test('stepDemonCombatAI transitions from patrol to chase, windup, and active lunge strike against player', () => {
+test('stepDemonCombatAI enforces strict territorial aggro (never attacks at spawn, only attacks inside territory)', () => {
+  // Verify none of the 6 INITIAL_DEMON_SPAWNS aggro when player starts at spawn (0, 8.2)
+  for (const spawn of INITIAL_DEMON_SPAWNS) {
+    const stepAtSpawn = stepDemonCombatAI(
+      {
+        x: spawn.position.x,
+        z: spawn.position.z,
+        homeX: spawn.position.x,
+        homeZ: spawn.position.z,
+        yaw: 0,
+        state: 'patrol',
+        stateTimer: 0,
+        attackCooldown: 0,
+        aggroRange: spawn.aggroRange,
+        moveSpeed: spawn.moveSpeed,
+        archetype: spawn.archetype,
+      },
+      { x: 0, z: 8.2 },
+      1.0,
+      0.1
+    );
+    assert.equal(
+      stepAtSpawn.state,
+      'patrol',
+      `Demon ${spawn.id} must remain on patrol when player is at spawn (0, 8.2)`
+    );
+  }
+
   const baseDemon = {
-    x: 0,
-    z: -10,
-    homeX: 0,
-    homeZ: -10,
+    x: -24,
+    z: -25,
+    homeX: -24,
+    homeZ: -25,
     yaw: 0,
     state: 'patrol' as const,
     stateTimer: 0,
     attackCooldown: 0,
-    aggroRange: 20,
+    aggroRange: 11.5,
     moveSpeed: 6.0,
     archetype: 'berserker' as const,
   };
 
-  // Player within aggro range (8m away) -> should chase
-  const chaseStep = stepDemonCombatAI(baseDemon, { x: 0, z: -2 }, 1.0, 0.1);
+  // Player enters demon territory (6m from demon home) -> should transition to chase
+  const chaseStep = stepDemonCombatAI(baseDemon, { x: -24, z: -19 }, 1.0, 0.1);
   assert.equal(chaseStep.state, 'chase');
-  assert.ok(chaseStep.z > -10, 'Demon should actively advance toward player');
+  assert.ok(chaseStep.z > -25, 'Demon should actively advance toward player inside its territory');
 
   // Player within melee range (2.2m away) -> should trigger windup telegraph
   const windupInput = {
     ...baseDemon,
     ...chaseStep,
-    x: 0,
-    z: -4.2,
+    x: -24,
+    z: -21.2,
   };
-  const windupStep = stepDemonCombatAI(windupInput, { x: 0, z: -2 }, 1.1, 0.05);
+  const windupStep = stepDemonCombatAI(windupInput, { x: -24, z: -19 }, 1.1, 0.05);
   assert.equal(windupStep.state, 'windup');
   assert.equal(windupStep.didTriggerWindup, true);
 
@@ -149,7 +210,7 @@ test('stepDemonCombatAI transitions from patrol to chase, windup, and active lun
     ...baseDemon,
     ...windupStep,
   };
-  const strikeStep = stepDemonCombatAI(strikeInput, { x: 0, z: -2 }, 1.6, 0.5);
+  const strikeStep = stepDemonCombatAI(strikeInput, { x: -24, z: -19 }, 1.6, 0.5);
   assert.equal(strikeStep.state, 'strike');
   assert.equal(strikeStep.didStrikePlayer, true, 'Demon should execute active lunge strike on player');
 });
@@ -182,13 +243,13 @@ test('computeCompassRibbonOffset centers target straight ahead when looking Nort
   assert.equal(Math.round(res.distanceMeters), 34);
 });
 
-test('resolveCollisions pushes player outside monument collider and clamps expanded world perimeter', () => {
+test('resolveCollisions pushes player outside monument collider and clamps expanded 175m world perimeter', () => {
   const colliders = getWorldColliders();
   const insideBastion = resolveCollisions({ x: -9.5, z: 6.2 }, 0.62, colliders);
   const distFromBastion = Math.hypot(insideBastion.x - -9.5, insideBastion.z - 6.2);
   assert.ok(distFromBastion >= 1.45 + 0.62 - 1e-4);
 
-  const outsideWorld = resolveCollisions({ x: 180, z: 0 }, 0.62, colliders);
+  const outsideWorld = resolveCollisions({ x: 210, z: 0 }, 0.62, colliders);
   assert.ok(outsideWorld.x <= WORLD_RADIUS - 0.62 + 1e-4);
 });
 
@@ -236,11 +297,19 @@ test('computePlayerCombatStats scales with visited stops and equipped weapon fro
   assert.ok(halberdStats.attackRange > baseStats.attackRange + 1.0);
 });
 
-test('shouldAwakenLayoffBoss, computeCompletionStats, canCastLightningBolt, and getRegionNameAt work accurately', () => {
+test('shouldAwakenLayoffBoss requires both 6 visited projects AND explicit challenge circle summon (never auto-spawns)', () => {
   assert.equal(shouldAwakenLayoffBoss(3, 2, false), false);
   assert.equal(shouldAwakenLayoffBoss(5, 5, true), false, 'Boss cannot be challenged before seeing all 6 projects');
-  assert.equal(shouldAwakenLayoffBoss(6, 0, false), true, 'Boss unlocks once all 6 projects have been seen');
-  assert.equal(shouldAwakenLayoffBoss(6, 5, true), true);
+  assert.equal(
+    shouldAwakenLayoffBoss(6, 5, false),
+    false,
+    'Boss must NOT auto-spawn when 6 projects are viewed until player challenges at the circle'
+  );
+  assert.equal(
+    shouldAwakenLayoffBoss(6, 5, true),
+    true,
+    'Boss awakens once all 6 projects are viewed AND player challenges the boss at the circle'
+  );
 
   assert.equal(canCastLightningBolt(5), false);
   assert.equal(canCastLightningBolt(6), true);
@@ -257,6 +326,9 @@ test('shouldAwakenLayoffBoss, computeCompletionStats, canCastLightningBolt, and 
 
   const valleyRegion = getRegionNameAt(0, 16);
   assert.ok(valleyRegion.includes('Portfolio Verse'));
+
+  const southTempleRegion = getRegionNameAt(0, 54);
+  assert.ok(southTempleRegion.includes('Sankalpa Mandapa'));
 });
 
 test('all 6 PORTFOLIO_STOPS map to REFERENCE_CASE_STUDIES with exact framerusercontent images and live links', async () => {
@@ -325,5 +397,63 @@ test('procedural weather system resolves time-of-day profiles and wraps particle
   assert.ok(farPetal.y >= localFloor, 'Particle should wrap above local terrain height');
 });
 
+test('getWorldColliders enforces solid physics on all 56 tree trunks, Saraswati bridge balustrades, and Highland Shrine Pillars', async () => {
+  const { TREE_GROVE_POSITIONS, HILL_SHRINE_PILLARS } = await import('./worldLogic');
+  const colliders = getWorldColliders();
+  assert.equal(TREE_GROVE_POSITIONS.length, 56, 'Should include 56 valley and hillside trees');
+  assert.equal(HILL_SHRINE_PILLARS.length, 8, 'Should include 8 highland shrine pillars');
 
+  // Verify player cannot walk through a tree trunk
+  const sampleTree = TREE_GROVE_POSITIONS[0];
+  const pushedFromTree = resolveCollisions(
+    { x: sampleTree.x + 0.05, z: sampleTree.z },
+    0.62,
+    colliders
+  );
+  const distFromTreeCenter = Math.hypot(
+    pushedFromTree.x - sampleTree.x,
+    pushedFromTree.z - sampleTree.z
+  );
+  assert.ok(
+    distFromTreeCenter > 0.62 + 0.35,
+    'Solid tree trunk collider must push player outside trunk radius'
+  );
+
+  // Verify player cannot run sideways through the Saraswati Bridge stone balustrade at (2.62, -3.5)
+  const pushedFromBridgeRail = resolveCollisions({ x: 2.55, z: -3.5 }, 0.62, colliders);
+  assert.ok(
+    Math.abs(pushedFromBridgeRail.x - 2.62) > 0.55,
+    'Saraswati bridge side-rail collider must prevent clipping through bridge parapet'
+  );
+
+  // Verify Highland Shrine Pillar blocks clipping
+  const pillar = HILL_SHRINE_PILLARS[0];
+  const pushedFromPillar = resolveCollisions({ x: pillar.x + 0.1, z: pillar.z }, 0.62, colliders);
+  assert.ok(
+    Math.hypot(pushedFromPillar.x - pillar.x, pushedFromPillar.z - pillar.z) >
+      pillar.scale * 0.72 + 0.5,
+    'Highland shrine pillar must block clipping'
+  );
+});
+
+test('resolveLocalHypoChat answers conversational questions about portfolio projects, career background, and Recruiter Temple with in-world actions', async () => {
+  const { resolveLocalHypoChat } = await import('./hypoBrain');
+
+  const veraResp = resolveLocalHypoChat('Tell me about HyperLM Vera CFO AI project', {
+    visitedCount: 1,
+    relicsCount: 1,
+    bossDefeated: false,
+  });
+  assert.ok(veraResp.reply.includes('Vera'), 'Should describe HyperLM Vera project');
+  assert.equal(veraResp.action?.type, 'teleport_project');
+  assert.equal(veraResp.action?.targetId, 'mandapa-origin');
+
+  const hireResp = resolveLocalHypoChat('How can I hire or email Ayush?', {
+    visitedCount: 3,
+    relicsCount: 2,
+    bossDefeated: false,
+  });
+  assert.ok(hireResp.reply.includes('ayush.dubeypd@gmail.com'));
+  assert.equal(hireResp.action?.type, 'teleport_temple');
+});
 

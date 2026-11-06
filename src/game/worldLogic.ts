@@ -2,6 +2,9 @@ import {
   PORTFOLIO_STOPS,
   LOTUS_RELICS,
   FORGE_WEAPONS,
+  LAYOFF_BOSS_CONFIG,
+  RECRUITER_TEMPLE_CONFIG,
+  HYPO_GUIDE_CONFIG,
   PortfolioStop,
   LotusRelic,
   ForgeWeapon,
@@ -29,7 +32,7 @@ export interface MovementInput {
 
 export type DemonCombatState = 'patrol' | 'chase' | 'windup' | 'strike' | 'recover' | 'stagger';
 
-export const WORLD_RADIUS = 135;
+export const WORLD_RADIUS = 175;
 export const PLAYER_RADIUS = 0.62;
 export const BASE_WALK_SPEED = 9.4;
 export const SPRINT_MULTIPLIER = 1.56;
@@ -41,6 +44,32 @@ export const BASE_ATTACK_DAMAGE = 20;
 export const BASE_ATTACK_RANGE = 4.8;
 export const MAX_GRAPPLE_DISTANCE = 56;
 export const MAX_STEP_UP_HEIGHT = 0.78;
+
+// Survival Mode Constants
+export const SURVIVAL_ARENA_CENTER: Vec2XZ = { x: 0, z: -48 }; // Northern Citadel
+export const SURVIVAL_ARENA_RADIUS = 25;
+export const SURVIVAL_WAVE_SIZE = 7;
+export const SURVIVAL_BASE_DEMON_HP = 120;
+export const SURVIVAL_BASE_DEMON_DAMAGE = 15;
+
+/**
+ * Finds the next unvisited PortfolioStop for guidance.
+ */
+export function findNextGuidanceSanctum(
+  playerPos: Vec2XZ,
+  visitedStopIds: ReadonlySet<string>,
+  stops: PortfolioStop[] = PORTFOLIO_STOPS
+): { stop: PortfolioStop; distance: number } | null {
+  // Sort stops by index or proximity? Usually index for a portfolio.
+  const unvisited = stops.filter((s) => !visitedStopIds.has(s.id));
+  if (unvisited.length === 0) return null;
+
+  // Find the one with the lowest index first
+  const nextByIndex = unvisited.sort((a, b) => a.indexNumber.localeCompare(b.indexNumber))[0];
+  const distance = Math.hypot(playerPos.x - nextByIndex.position.x, playerPos.z - nextByIndex.position.z);
+
+  return { stop: nextByIndex, distance };
+}
 
 export const BOULDER_OUTCROPS: ReadonlyArray<{ x: number; z: number; scale: number }> = [
   { x: -8.5, z: 4.2, scale: 1.0 },
@@ -55,24 +84,122 @@ export const BOULDER_OUTCROPS: ReadonlyArray<{ x: number; z: number; scale: numb
   { x: 28.5, z: -12.0, scale: 1.55 },
   { x: -11.5, z: -34.0, scale: 1.3 },
   { x: 11.5, z: -34.0, scale: 1.3 },
+  // Highland & Hillside Boulder Outcrops
+  { x: -64.0, z: -22.0, scale: 1.85 },
+  { x: 64.0, z: -22.0, scale: 1.85 },
+  { x: -68.0, z: 24.0, scale: 1.9 },
+  { x: 68.0, z: 24.0, scale: 1.9 },
+  { x: -42.0, z: -64.0, scale: 1.75 },
+  { x: 42.0, z: -64.0, scale: 1.75 },
+  { x: -44.0, z: 66.0, scale: 1.8 },
+  { x: 44.0, z: 66.0, scale: 1.8 },
+  { x: -88.0, z: 2.0, scale: 2.1 },
+  { x: 88.0, z: 2.0, scale: 2.1 },
+  { x: 0.0, z: -84.0, scale: 2.2 },
+  { x: 0.0, z: 86.0, scale: 2.1 },
+];
+
+export interface TreeGroveNode {
+  x: number;
+  z: number;
+  s: number;
+  golden: boolean;
+}
+
+/**
+ * Canonical 56-Tree Sacred Forest & Highland Grove coordinates shared between
+ * 3D scene rendering (`proceduralScene.ts`) and solid trunk collision physics (`getWorldColliders()`).
+ */
+export const TREE_GROVE_POSITIONS: ReadonlyArray<TreeGroveNode> = [
+  // Inner Valley Sacred Banyans & Golden Peepals (18)
+  { x: -13.5, z: -2, s: 1.45, golden: false },
+  { x: 13.5, z: -2, s: 1.45, golden: true },
+  { x: -22, z: -26, s: 1.55, golden: true },
+  { x: 22, z: -26, s: 1.55, golden: false },
+  { x: -30, z: 4, s: 1.35, golden: false },
+  { x: 30, z: 4, s: 1.35, golden: true },
+  { x: -24, z: 36, s: 1.5, golden: true },
+  { x: 24, z: 36, s: 1.5, golden: false },
+  { x: -52, z: -4, s: 1.75, golden: false },
+  { x: 52, z: -4, s: 1.75, golden: true },
+  { x: -48, z: -36, s: 1.65, golden: true },
+  { x: 48, z: -36, s: 1.65, golden: false },
+  { x: -48, z: 38, s: 1.65, golden: false },
+  { x: 48, z: 38, s: 1.65, golden: true },
+  { x: -18, z: -56, s: 1.6, golden: true },
+  { x: 18, z: -56, s: 1.6, golden: false },
+  { x: -18, z: 52, s: 1.55, golden: true },
+  { x: 18, z: 52, s: 1.55, golden: false },
+  // Mid-Slope & Sanctum Perimeter Groves (16)
+  { x: -34, z: -44, s: 1.6, golden: false },
+  { x: 34, z: -44, s: 1.6, golden: true },
+  { x: -34, z: 48, s: 1.6, golden: true },
+  { x: 34, z: 48, s: 1.6, golden: false },
+  { x: -58, z: -20, s: 1.7, golden: true },
+  { x: 58, z: -20, s: 1.7, golden: false },
+  { x: -58, z: 20, s: 1.7, golden: false },
+  { x: 58, z: 20, s: 1.7, golden: true },
+  { x: -14, z: 22, s: 1.32, golden: false },
+  { x: 14, z: 22, s: 1.32, golden: true },
+  { x: -15, z: -16, s: 1.35, golden: true },
+  { x: 15, z: -16, s: 1.35, golden: false },
+  { x: -28, z: -14, s: 1.42, golden: false },
+  { x: 28, z: -14, s: 1.42, golden: true },
+  { x: -28, z: 16, s: 1.42, golden: true },
+  { x: 28, z: 16, s: 1.42, golden: false },
+  // Surrounding Hillside & Highland Ridge Groves (22) — fills the surrounding hills with lush canopy volume!
+  { x: -76, z: -12, s: 1.85, golden: false },
+  { x: 76, z: -12, s: 1.85, golden: true },
+  { x: -78, z: 16, s: 1.85, golden: true },
+  { x: 78, z: 16, s: 1.85, golden: false },
+  { x: -68, z: -48, s: 1.9, golden: false },
+  { x: 68, z: -48, s: 1.9, golden: true },
+  { x: -68, z: 50, s: 1.9, golden: true },
+  { x: 68, z: 50, s: 1.9, golden: false },
+  { x: -46, z: -76, s: 1.85, golden: true },
+  { x: 46, z: -76, s: 1.85, golden: false },
+  { x: -46, z: 78, s: 1.85, golden: false },
+  { x: 46, z: 78, s: 1.85, golden: true },
+  { x: -22, z: -82, s: 1.8, golden: false },
+  { x: 22, z: -82, s: 1.8, golden: true },
+  { x: -22, z: 82, s: 1.8, golden: true },
+  { x: 22, z: 82, s: 1.8, golden: false },
+  { x: -96, z: -32, s: 2.05, golden: true },
+  { x: 96, z: -32, s: 2.05, golden: false },
+  { x: -96, z: 32, s: 2.05, golden: false },
+  { x: 96, z: 32, s: 2.05, golden: true },
+  { x: -84, z: -68, s: 1.95, golden: false },
+  { x: 84, z: -68, s: 1.95, golden: true },
+];
+
+export const HILL_SHRINE_PILLARS: ReadonlyArray<{ x: number; z: number; scale: number }> = [
+  { x: -82, z: 0, scale: 1.35 },
+  { x: 82, z: 0, scale: 1.35 },
+  { x: -62, z: -62, scale: 1.4 },
+  { x: 62, z: -62, scale: 1.4 },
+  { x: -62, z: 62, scale: 1.4 },
+  { x: 62, z: 62, scale: 1.4 },
+  { x: 0, z: -76, scale: 1.45 },
+  { x: 0, z: 78, scale: 1.45 },
 ];
 
 /**
- * Deterministic macro terrain elevation at (x, z) across the 270m diameter Portfolio Verse Valley:
+ * Deterministic macro terrain elevation at (x, z) across the expanded 350m diameter Portfolio Verse Valley:
  * - Spawn corridor around (0, 8) sits on a gentle walkable Great Plateau terrace near y = 0.
  * - Northern Sovereign Mandapa (0, -26) sits on an elevated temple hillock (+1.45m).
  * - Far-Northern Rakshasa Citadel / Boss Arena (0, -48) forms a grand ceremonial plateau (+1.75m).
+ * - Southern Sankalpa Mandapa / Recruiter Opportunity Temple (0, 54) sits on a royal golden terrace (+1.35m).
  * - East & West Sanctums sit on scenic elevated terraces.
  * - Winding Saraswati turquoise river channel cuts across z ~ -3.5 + sin(x*0.09)*3.4 with an arched stone ford at |x| < 4.5.
- * - Outer perimeter (r > 64m) rises into dramatic Himalayan/Vindhya mountain peaks.
+ * - Outer perimeter (r > 72m) rises into dramatic Himalayan/Vindhya mountain peaks.
  */
 export function groundHeightAt(x: number, z: number): number {
   const distFromCenter = Math.hypot(x, z);
 
-  // Sculpted walkable 3D mountain peaks and passes rising beyond 56m (player can climb right up the slopes!)
+  // Sculpted walkable 3D mountain peaks and passes rising beyond 72m (player can climb right up the slopes!)
   let hillHeight = 0;
-  if (distFromCenter > 56) {
-    const t = Math.min(1, (distFromCenter - 56) / 68);
+  if (distFromCenter > 72) {
+    const t = Math.min(1, (distFromCenter - 72) / 86);
     const smooth = t * t * (3 - 2 * t);
     const angle = Math.atan2(z, x);
     // 8 distinct grand mountain peaks around the valley perimeter with climbable passes between them
@@ -80,7 +207,7 @@ export function groundHeightAt(x: number, z: number): number {
     const ridgeWave =
       0.55 * Math.sin(x * 0.075) * Math.cos(z * 0.075) +
       0.45 * Math.cos((x - z) * 0.055);
-    hillHeight = smooth * (14.5 + peakCrown * 11.5 + ridgeWave * 4.2);
+    hillHeight = smooth * (15.5 + peakCrown * 12.0 + ridgeWave * 4.2);
   }
 
   // Elevated hill mound under the Northern Sovereign Mandapa (x ~ 0, z ~ -26)
@@ -99,6 +226,19 @@ export function groundHeightAt(x: number, z: number): number {
   } else if (distToBossArena < 16.5) {
     const bt = 1 - (distToBossArena - 11.5) / 5.0;
     bossPlateau = bt * bt * (3 - 2 * bt) * 1.75;
+  }
+
+  // Elevated Southern Recruiter Opportunity Temple Plateau at (0, 54)
+  const distToRecruiterTemple = Math.hypot(
+    x - RECRUITER_TEMPLE_CONFIG.position.x,
+    z - RECRUITER_TEMPLE_CONFIG.position.z
+  );
+  let recruiterPlateau = 0;
+  if (distToRecruiterTemple <= 10.5) {
+    recruiterPlateau = 1.35;
+  } else if (distToRecruiterTemple < 16.0) {
+    const rt = 1 - (distToRecruiterTemple - 10.5) / 5.5;
+    recruiterPlateau = rt * rt * (3 - 2 * rt) * 1.35;
   }
 
   // Gentle East & West Sanctuary Terraces
@@ -127,11 +267,40 @@ export function groundHeightAt(x: number, z: number): number {
   // Natural rolling meadow undulation away from main paths
   const onMainTrail = Math.abs(x) < 4.6 || Math.abs(z) < 4.0;
   let meadowWave = 0;
-  if (!onMainTrail && distFromCenter <= 64) {
-    meadowWave = 0.34 * Math.sin(x * 0.12) * Math.cos(z * 0.11);
+  if (!onMainTrail && distFromCenter <= 72) {
+    meadowWave = 0.28 * Math.sin(x * 0.12) * Math.cos(z * 0.11);
   }
 
-  return hillHeight + moundHeight + bossPlateau + terraceHeight + riverDip + meadowWave;
+  return hillHeight + moundHeight + bossPlateau + recruiterPlateau + terraceHeight + riverDip + meadowWave;
+}
+
+/**
+ * Returns true if the player is standing on a hard stone causeway, bridge, temple plinth, or arena floor
+ * (used for stone vs. meadow grass footstep acoustic foley).
+ */
+export function isOnStoneSurfaceAt(x: number, z: number): boolean {
+  // Main North-South Flagstone Causeway (from Northern Boss Arena z=-48 to Southern Recruiter Temple z=54)
+  if (Math.abs(x) <= 2.8 && z >= -52 && z <= 60) return true;
+  // Northern Boss Arena
+  if (Math.hypot(x, z + 48) <= 12.2) return true;
+  // Southern Recruiter Opportunity Temple
+  if (
+    Math.hypot(
+      x - RECRUITER_TEMPLE_CONFIG.position.x,
+      z - RECRUITER_TEMPLE_CONFIG.position.z
+    ) <= 9.0
+  ) {
+    return true;
+  }
+  // 6 Project Sanctum Plinths
+  for (const stop of PORTFOLIO_STOPS) {
+    if (Math.hypot(x - stop.position.x, z - stop.position.z) <= 6.8) return true;
+  }
+  // 4 Weapon Forge Altars
+  for (const wf of FORGE_WEAPONS) {
+    if (Math.hypot(x - wf.position.x, z - wf.position.z) <= 2.3) return true;
+  }
+  return false;
 }
 
 /**
@@ -139,6 +308,7 @@ export function groundHeightAt(x: number, z: number): number {
  * - Macro terrain (`groundHeightAt`)
  * - Royal Saraswati Bridge deck & approach ramps at (0, -3.5)
  * - 6 Portfolio Sanctum stepped Jagati plinths, upper sanctum decks, and front Sopana staircases
+ * - Southern Recruiter Opportunity Temple stepped mandapa & stairs at (0, 54)
  * - 4 Vishwakarma Weapon Forge stepped anvil platforms
  * - 5 Sacred Lotus Jewel pedestals
  * - Northern Boss Citadel stone arena ring & steps
@@ -224,6 +394,38 @@ export function walkableSurfaceHeightAt(
       const altarY = monBaseY + 1.28;
       if (altarY > bestSurfaceY && canStepOnto(altarY)) {
         bestSurfaceY = altarY;
+      }
+    }
+  }
+
+  // 2B. Southern Recruiter Opportunity Temple (Sankalpa Mandapa) at (0, 54)
+  {
+    const tx = RECRUITER_TEMPLE_CONFIG.position.x;
+    const tz = RECRUITER_TEMPLE_CONFIG.position.z;
+    const dx = x - tx;
+    const dz = z - tz;
+    const r = Math.hypot(dx, dz);
+    if (r <= 9.6) {
+      const templeBaseY = groundHeightAt(tx, tz);
+      // Northern approach staircase (`dz` from -8.8 to -5.5)
+      if (Math.abs(dx) <= 2.2 && dz >= -8.8 && dz <= -5.5) {
+        const stairT = 1 - Math.max(0, Math.min(1, (-dz - 5.5) / 3.3));
+        const stairY = templeBaseY + stairT * 1.05;
+        if (stairY > bestSurfaceY && canStepOnto(stairY)) {
+          bestSurfaceY = stairY;
+        }
+      }
+      if (r <= 7.8) {
+        const step1Y = templeBaseY + 0.52;
+        if (step1Y > bestSurfaceY && canStepOnto(step1Y)) {
+          bestSurfaceY = step1Y;
+        }
+      }
+      if (r <= 6.2) {
+        const step2Y = templeBaseY + 1.05;
+        if (step2Y > bestSurfaceY && canStepOnto(step2Y)) {
+          bestSurfaceY = step2Y;
+        }
       }
     }
   }
@@ -488,8 +690,10 @@ export function resolveCombatDefense(
 
 /**
  * Pure, deterministic AI state machine step for roaming Shadow Asura Demons.
- * Transitions across: 'patrol' -> 'chase' -> 'windup' -> 'strike' -> 'recover' -> 'stagger'
- * and triggers `didStrikePlayer = true` on the active lunge frame so enemies actively attack!
+ * - Territorial Aggro Rule: Asuras ONLY attack when the player enters their dedicated territory zone
+ *   (`dist <= demon.aggroRange` AND `playerDistFromHome <= territoryRadius`).
+ * - If the player leaves their territory (`playerDistFromHome > territoryRadius + 2.5`), the Asura disengages
+ *   and returns to patrolling its territory.
  */
 export function stepDemonCombatAI(
   demon: {
@@ -502,6 +706,7 @@ export function stepDemonCombatAI(
     stateTimer: number;
     attackCooldown: number;
     aggroRange: number;
+    territoryRadius?: number;
     moveSpeed: number;
     archetype: DemonArchetype;
   },
@@ -530,6 +735,11 @@ export function stepDemonCombatAI(
   const dz = playerPos.z - z;
   const dist = Math.hypot(dx, dz);
 
+  const territoryMax = demon.territoryRadius ?? demon.aggroRange + 3.0;
+  const playerDistFromHome = Math.hypot(playerPos.x - demon.homeX, playerPos.z - demon.homeZ);
+  const isPlayerInTerritory =
+    dist <= demon.aggroRange && playerDistFromHome <= territoryMax;
+
   if (isModalOpen) {
     return {
       x,
@@ -545,7 +755,7 @@ export function stepDemonCombatAI(
 
   if (state === 'stagger') {
     if (stateTimer <= 0) {
-      state = dist <= demon.aggroRange ? 'chase' : 'patrol';
+      state = isPlayerInTerritory ? 'chase' : 'patrol';
     }
     return { x, z, yaw, state, stateTimer, attackCooldown, didTriggerWindup, didStrikePlayer };
   }
@@ -581,25 +791,30 @@ export function stepDemonCombatAI(
 
   if (state === 'recover') {
     if (stateTimer <= 0) {
-      state = dist <= demon.aggroRange ? 'chase' : 'patrol';
+      state = isPlayerInTerritory ? 'chase' : 'patrol';
     }
     return { x, z, yaw, state, stateTimer, attackCooldown, didTriggerWindup, didStrikePlayer };
   }
 
-  // 'patrol' or 'chase'
-  if (dist <= demon.aggroRange) {
+  // 'patrol' or 'chase' — ONLY chase if player has stepped inside the demon's territory!
+  if (isPlayerInTerritory) {
     state = 'chase';
     yaw = Math.atan2(dx, dz);
     const strikeTriggerDist = demon.archetype === 'vanguard' ? 3.7 : 3.4;
 
     if (dist > strikeTriggerDist) {
       const chaseSpeed = demon.moveSpeed * 1.05;
-      // Stalker weaves slightly while closing in; Berserker charges straight; Vanguard marches steadily
       const weaveAngle =
         demon.archetype === 'stalker' ? Math.sin(elapsed * 4.2 + demon.homeX) * 0.28 : 0;
       const moveAngle = yaw + weaveAngle;
-      x += Math.sin(moveAngle) * chaseSpeed * dt;
-      z += Math.cos(moveAngle) * chaseSpeed * dt;
+      const nextX = x + Math.sin(moveAngle) * chaseSpeed * dt;
+      const nextZ = z + Math.cos(moveAngle) * chaseSpeed * dt;
+      // Clamp demon to its territorial leash
+      const distFromHomeNext = Math.hypot(nextX - demon.homeX, nextZ - demon.homeZ);
+      if (distFromHomeNext <= territoryMax + 1.5) {
+        x = nextX;
+        z = nextZ;
+      }
     } else if (attackCooldown <= 0) {
       state = 'windup';
       stateTimer = demon.archetype === 'stalker' ? 0.42 : 0.48;
@@ -607,9 +822,9 @@ export function stepDemonCombatAI(
     }
   } else {
     state = 'patrol';
-    const patrolAngle = elapsed * 0.75 + demon.homeX * 0.5;
-    const targetX = demon.homeX + Math.cos(patrolAngle) * 3.4;
-    const targetZ = demon.homeZ + Math.sin(patrolAngle) * 3.4;
+    const patrolAngle = elapsed * 0.65 + demon.homeX * 0.5;
+    const targetX = demon.homeX + Math.cos(patrolAngle) * 3.2;
+    const targetZ = demon.homeZ + Math.sin(patrolAngle) * 3.2;
     const pdx = targetX - x;
     const pdz = targetZ - z;
     const pDist = Math.hypot(pdx, pdz);
@@ -727,18 +942,21 @@ export function resolveCollisions(
   let x = pos.x;
   let z = pos.z;
 
-  for (const col of colliders) {
-    const dx = x - col.x;
-    const dz = z - col.z;
-    const dist = Math.hypot(dx, dz);
-    const minDist = playerRadius + col.radius;
-    if (dist < minDist) {
-      if (dist < 1e-5) {
-        x = col.x + minDist;
-      } else {
-        const push = (minDist - dist) / dist;
-        x += dx * push;
-        z += dz * push;
+  // 3 iterative relaxation passes ensure zero tunneling or corner wedging against bridges, trees, and pillars
+  for (let pass = 0; pass < 3; pass++) {
+    for (const col of colliders) {
+      const dx = x - col.x;
+      const dz = z - col.z;
+      const dist = Math.hypot(dx, dz);
+      const minDist = playerRadius + col.radius;
+      if (dist < minDist) {
+        if (dist < 1e-5) {
+          x = col.x + minDist;
+        } else {
+          const push = (minDist - dist) / dist;
+          x += dx * push;
+          z += dz * push;
+        }
       }
     }
   }
@@ -755,28 +973,32 @@ export function resolveCollisions(
 }
 
 /**
- * Builds the static colliders for solid vertical structures (obelisks, tree trunks, bridge side-rails,
- * torana gateway columns, and inner sanctum pillars) so the player can step up onto monument plinths
- * without walking through solid stone columns or railings.
+ * Builds the static colliders for all solid vertical structures across Portfolio Verse:
+ * - All 56 Sacred Banyan, Peepal & Highland Trees (`TREE_GROVE_POSITIONS`)
+ * - Continuous Saraswati Bridge side balustrades (impenetrable side walls along z in [-7.8, 0.8])
+ * - Grand Torana Gateway columns, Lookout Obelisks, and Hypo Companion Pedestal
+ * - 6 Portfolio Project Monument sanctum cores & front staircase balustrade side-walls
+ * - Southern Recruiter Opportunity Temple central altar & 8 outer Hoysala columns
+ * - 8 Northern Boss Citadel perimeter obelisks & 8 Highland Shrine Pillars
  */
 export function getWorldColliders(): CircleCollider[] {
   const cols: CircleCollider[] = [
     // Wide flanking Great Plateau Lookout Obelisks
     { id: 'bastion-left', x: -9.5, z: 6.2, radius: 1.45 },
     { id: 'bastion-right', x: 9.5, z: 6.2, radius: 1.45 },
-    // Twin Flanking Sacred Banyan Tree Trunks framing the mid-valley
-    { id: 'banyan-west', x: -13.5, z: -2, radius: 1.55 },
-    { id: 'banyan-east', x: 13.5, z: -2, radius: 1.55 },
+    // Twin Flanking Sacred Banyan Tree Trunks framing the mid-valley (kept with canonical IDs for backwards compatibility)
+    { id: 'banyan-west', x: -13.5, z: -2, radius: 1.15 },
+    { id: 'banyan-east', x: 13.5, z: -2, radius: 1.15 },
     // Grand Torana Gateway & Front Celestial Aura Ring Pillars along northern avenue
     { id: 'torana-n-left', x: -4.3, z: -12.5, radius: 0.95 },
     { id: 'torana-n-right', x: 4.3, z: -12.5, radius: 0.95 },
-    // Saraswati Bridge Side Balustrade Posts (keeps player on the bridge deck instead of walking through side rails)
-    { id: 'bridge-rail-w1', x: -2.6, z: -6.5, radius: 0.42 },
-    { id: 'bridge-rail-w2', x: -2.6, z: -3.5, radius: 0.42 },
-    { id: 'bridge-rail-w3', x: -2.6, z: -0.5, radius: 0.42 },
-    { id: 'bridge-rail-e1', x: 2.6, z: -6.5, radius: 0.42 },
-    { id: 'bridge-rail-e2', x: 2.6, z: -3.5, radius: 0.42 },
-    { id: 'bridge-rail-e3', x: 2.6, z: -0.5, radius: 0.42 },
+    // Hypo Companion Pedestal at Meru Lookout (3.8, 5.4)
+    {
+      id: 'col-hypo-pedestal',
+      x: HYPO_GUIDE_CONFIG.position.x,
+      z: HYPO_GUIDE_CONFIG.position.z,
+      radius: 0.78,
+    },
     // 6 Portfolio Project Monument central sanctum cores (sized to the inner sanctum structure so outer stepped plinth is walkable!)
     { id: 'col-mandapa', x: 0, z: -26, radius: 2.15 },
     { id: 'col-jantar', x: 38, z: -16, radius: 2.35 },
@@ -784,7 +1006,88 @@ export function getWorldColliders(): CircleCollider[] {
     { id: 'col-ashoka', x: -38, z: 24, radius: 1.45 },
     { id: 'col-gopuram', x: -38, z: -16, radius: 2.35 },
     { id: 'col-stepwell', x: 0, z: 32, radius: 2.35 },
+    // Southern Recruiter Opportunity Temple central altar pedestal
+    {
+      id: 'col-recruiter-temple-core',
+      x: RECRUITER_TEMPLE_CONFIG.position.x,
+      z: RECRUITER_TEMPLE_CONFIG.position.z,
+      radius: 1.85,
+    },
   ];
+
+  // Continuous Saraswati Bridge Side Balustrade Walls (13 densely spaced overlapping colliders per side from z = -7.7 to z = +0.7)
+  const bridgeZPoints = [-7.7, -7.0, -6.3, -5.6, -4.9, -4.2, -3.5, -2.8, -2.1, -1.4, -0.7, 0.0, 0.7];
+  bridgeZPoints.forEach((bz, idx) => {
+    cols.push(
+      { id: `bridge-rail-w${idx + 1}`, x: -2.62, z: bz, radius: 0.44 },
+      { id: `bridge-rail-e${idx + 1}`, x: 2.62, z: bz, radius: 0.44 }
+    );
+  });
+
+  // All 56 Sacred Banyan, Peepal & Highland Tree Trunks
+  TREE_GROVE_POSITIONS.forEach((tree, idx) => {
+    // Skip idx 0 & 1 which are already registered as 'banyan-west' and 'banyan-east'
+    if (idx < 2) return;
+    cols.push({
+      id: `tree-trunk-${idx}`,
+      x: tree.x,
+      z: tree.z,
+      radius: 0.58 * tree.s,
+    });
+  });
+
+  // Monument Front Staircase Balustrade Side-Walls (so player walks up the steps instead of clipping through side walls)
+  for (const stop of PORTFOLIO_STOPS) {
+    for (const side of [-1.48, 1.48]) {
+      cols.push(
+        {
+          id: `stair-rail-${stop.id}-${side < 0 ? 'w' : 'e'}-1`,
+          x: stop.position.x + side,
+          z: stop.position.z + 5.3,
+          radius: 0.34,
+        },
+        {
+          id: `stair-rail-${stop.id}-${side < 0 ? 'w' : 'e'}-2`,
+          x: stop.position.x + side,
+          z: stop.position.z + 6.4,
+          radius: 0.34,
+        }
+      );
+    }
+  }
+
+  // Southern Recruiter Temple 8 Outer Hoysala Columns
+  for (let p = 0; p < 8; p++) {
+    const a = (p / 8) * Math.PI * 2 + Math.PI / 8;
+    cols.push({
+      id: `rec-temple-pillar-${p}`,
+      x: RECRUITER_TEMPLE_CONFIG.position.x + Math.cos(a) * 4.4,
+      z: RECRUITER_TEMPLE_CONFIG.position.z + Math.sin(a) * 4.4,
+      radius: 0.48,
+    });
+  }
+
+  // Northern Boss Arena Perimeter Obelisks
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    if (Math.sin(a) > 0.45) continue;
+    cols.push({
+      id: `boss-obelisk-${i}`,
+      x: Math.cos(a) * 10.8,
+      z: -48 + Math.sin(a) * 10.8,
+      radius: 0.55,
+    });
+  }
+
+  // 8 Highland Shrine Ruin Pillars on the Surrounding Hills
+  HILL_SHRINE_PILLARS.forEach((hp, idx) => {
+    cols.push({
+      id: `hill-shrine-pillar-${idx}`,
+      x: hp.x,
+      z: hp.z,
+      radius: 0.72 * hp.scale,
+    });
+  });
 
   return cols;
 }
@@ -815,6 +1118,57 @@ export function findNearestStop(
     nearestStop,
     distance: bestDist,
     inRange: bestDist <= nearestStop.interactionRadius,
+  };
+}
+
+/**
+ * Checks whether the player is within interaction range of the Southern Recruiter Opportunity Temple.
+ */
+export function isNearRecruiterTemple(
+  playerPos: Vec2XZ,
+  interactRadius = RECRUITER_TEMPLE_CONFIG.interactionRadius
+): { inRange: boolean; distance: number } {
+  const distance = Math.hypot(
+    playerPos.x - RECRUITER_TEMPLE_CONFIG.position.x,
+    playerPos.z - RECRUITER_TEMPLE_CONFIG.position.z
+  );
+  return {
+    inRange: distance <= interactRadius,
+    distance,
+  };
+}
+
+/**
+ * Checks whether the player is within interaction range of Hypo the Companion Guide near Spawn.
+ */
+export function isNearHypoGuide(
+  playerPos: Vec2XZ,
+  interactRadius = HYPO_GUIDE_CONFIG.interactionRadius
+): { inRange: boolean; distance: number } {
+  const distance = Math.hypot(
+    playerPos.x - HYPO_GUIDE_CONFIG.position.x,
+    playerPos.z - HYPO_GUIDE_CONFIG.position.z
+  );
+  return {
+    inRange: distance <= interactRadius,
+    distance,
+  };
+}
+
+/**
+ * Checks whether the player is standing inside or right beside the Northern Boss Challenge Circle at (0, -45.8).
+ */
+export function isInsideBossChallengeCircle(
+  playerPos: Vec2XZ,
+  radius = LAYOFF_BOSS_CONFIG.challengeCircleRadius
+): { inRange: boolean; distance: number } {
+  const distance = Math.hypot(
+    playerPos.x - LAYOFF_BOSS_CONFIG.challengeCirclePosition.x,
+    playerPos.z - LAYOFF_BOSS_CONFIG.challengeCirclePosition.z
+  );
+  return {
+    inRange: distance <= radius,
+    distance,
   };
 }
 
@@ -917,17 +1271,18 @@ export function computePlayerCombatStats(
 }
 
 /**
- * Determines whether the Colossal Layoff Boss can be challenged / awakened:
- * The Layoff Boss CANNOT be challenged without seeing all 6 Project Sanctums first!
- * Once all 6 projects have been visited (`visitedStopsCount >= totalStops`), the boss unlocks.
+ * Determines whether the Colossal Layoff Boss should awaken:
+ * - The Layoff Boss CANNOT be challenged without seeing all 6 Project Sanctums first (`visitedStopsCount >= totalStops`).
+ * - AND it does NOT auto-spawn when the 6th project is viewed! The player must explicitly challenge the boss
+ *   at the Northern Citadel Challenge Circle (`manuallySummoned === true`).
  */
 export function shouldAwakenLayoffBoss(
   visitedStopsCount: number,
   _collectedRelicsCount = 0,
-  _manuallySummoned = false,
+  manuallySummoned = false,
   totalStops = PORTFOLIO_STOPS.length
 ): boolean {
-  return visitedStopsCount >= totalStops;
+  return visitedStopsCount >= totalStops && Boolean(manuallySummoned);
 }
 
 /**
@@ -968,6 +1323,14 @@ export function getRegionNameAt(x: number, z: number): string {
   if (near.distance <= near.nearestStop.interactionRadius + 3.5) {
     return near.nearestStop.title;
   }
+  if (
+    Math.hypot(
+      x - RECRUITER_TEMPLE_CONFIG.position.x,
+      z - RECRUITER_TEMPLE_CONFIG.position.z
+    ) <= 13.5
+  ) {
+    return 'Sankalpa Mandapa · Temple of Opportunities';
+  }
   if (z < -36) {
     return 'Rakshasa Ranga · Citadel of the Layoff Colossus';
   }
@@ -980,13 +1343,16 @@ export function getRegionNameAt(x: number, z: number): string {
   if (z < -12) {
     return 'Uttara Patha · Celestial Aura Gate & Ascent';
   }
+  if (z > 40) {
+    return 'Dakshina Patha · Royal Opportunity Promenade';
+  }
   if (x > 14) {
     return 'Purva Vana · Solar Forge & Emerald Oasis';
   }
   if (x < -14) {
     return 'Paschima Vana · Twin-Blade Forge & Gopuram Terraces';
   }
-  if (Math.hypot(x, z) > 58) {
+  if (Math.hypot(x, z) > 68) {
     return 'Himavat Shikhara · Walkable Mountain Peaks';
   }
   return 'Madhya Mandala · Open Valley of Portfolio Verse';
@@ -1033,4 +1399,5 @@ export function computeLightningBoltDamage(isBoss: boolean): {
     postureDamage: 100,
   };
 }
+
 

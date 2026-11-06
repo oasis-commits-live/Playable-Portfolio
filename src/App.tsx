@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PORTFOLIO_STOPS, LOTUS_RELICS, LotusRelic } from './data/portfolioStops';
+import { PORTFOLIO_STOPS, LotusRelic } from './data/portfolioStops';
 import { TimeOfDay } from './game/proceduralScene';
 import { getNextWeatherPreset, resolveWeatherProfile, WeatherPresetId } from './game/weatherSystem';
 import { sound } from './game/sound';
@@ -12,7 +12,13 @@ import { WorldCanvas, WorldControllerRef } from './components/WorldCanvas';
 import { TitleScreen } from './components/TitleScreen';
 import { HudOverlay, HudTelemetry } from './components/HudOverlay';
 import { StopModal } from './components/StopModal';
+import { HypoGuideModal } from './components/HypoGuideModal';
+import { RecruiterTempleModal } from './components/RecruiterTempleModal';
 import { LandscapeOrientationGate } from './components/MobileRpgPad';
+import { db } from './firebase';
+import { collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp } from 'firebase/firestore';
+
+export type GameMode = 'portfolio' | 'survival';
 
 export default function App() {
   const [gameState, setGameState] = useState<
@@ -27,6 +33,11 @@ export default function App() {
     return 'title';
   });
 
+  const [gameMode, setGameMode] = useState<GameMode>('portfolio');
+  const [survivalWave, setSurvivalWave] = useState(1);
+  const [survivalScore, setSurvivalScore] = useState(0);
+  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; wave: number }[]>([]);
+
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [visitedStopIds, setVisitedStopIds] = useState<Set<string>>(() => new Set());
   const [collectedRelicIds, setCollectedRelicIds] = useState<Set<string>>(() => new Set());
@@ -36,6 +47,8 @@ export default function App() {
   const [gamepadConnected, setGamepadConnected] = useState(false);
   const [recentRelicToast, setRecentRelicToast] = useState<string | null>(null);
   const [bossAnnounced, setBossAnnounced] = useState(false);
+  const [hypoGuideOpen, setHypoGuideOpen] = useState(false);
+  const [recruiterTempleOpen, setRecruiterTempleOpen] = useState(false);
 
   const [dispatchedScrolls, setDispatchedScrolls] = useState<
     { sender: string; organization: string; message: string; timestamp: string }[]
@@ -75,9 +88,41 @@ export default function App() {
   // Mirror game state to document.body.dataset.state
   useEffect(() => {
     document.body.dataset.state = gameState;
-  }, [gameState]);
+    document.body.dataset.mode = gameMode;
+  }, [gameState, gameMode]);
 
-  // Announce the Sky-Lightning Bolt & Layoff Boss awakening once all 6 Project Scrolls are viewed
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
+      const querySnapshot = await getDocs(q);
+      const entries = querySnapshot.docs.map(doc => doc.data() as { name: string; score: number; wave: number });
+      setLeaderboard(entries);
+    } catch (err) {
+      console.error('Failed to fetch leaderboard:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (gameState === 'title') {
+      fetchLeaderboard();
+    }
+  }, [gameState, fetchLeaderboard]);
+
+  const saveSurvivalScore = useCallback(async (name: string, score: number, wave: number) => {
+    try {
+      await addDoc(collection(db, 'leaderboard'), {
+        name,
+        score,
+        wave,
+        timestamp: serverTimestamp(),
+      });
+      fetchLeaderboard();
+    } catch (err) {
+      console.error('Failed to save score:', err);
+    }
+  }, [fetchLeaderboard]);
+
+  // Announce that the Boss Challenge Circle & Sky-Lightning Bolt are unlocked once all 6 Project Scrolls are viewed (without auto-spawning the boss!)
   useEffect(() => {
     if (
       !bossAnnounced &&
@@ -85,15 +130,18 @@ export default function App() {
       !activeStopId
     ) {
       setBossAnnounced(true);
-      sound.playBossAwaken();
+      sound.playRelicChime(true);
       showToast(
-        '⚡ ALL 6 PROJECTS SEEN! SUPER POWER UNLOCKED: Press [Z] to call down INDRA SKY-LIGHTNING BOLT & vanquish the Layoff Monster [B]!',
-        7000
+        '⚔ ALL 6 PROJECTS SEEN! Go to the Northern Challenge Circle & press [E] or [B] to challenge the Layoff Boss with [Z] ⚡ SKY-LIGHTNING!',
+        7500
       );
     }
   }, [visitedStopIds, activeStopId, bossAnnounced, showToast]);
 
-  const handleStartFromTitle = useCallback(() => {
+  const handleStartFromTitle = useCallback((mode: GameMode = 'portfolio') => {
+    setGameMode(mode);
+    setSurvivalWave(1);
+    setSurvivalScore(0);
     document.body.dataset.state = 'playing';
     setGameState('playing');
     sound.playTempleBell(432);
@@ -101,6 +149,8 @@ export default function App() {
 
   const handleInspectStop = useCallback(
     (stopId: string) => {
+      setHypoGuideOpen(false);
+      setRecruiterTempleOpen(false);
       setActiveStopId(stopId);
       setVisitedStopIds((prev) => {
         if (prev.has(stopId)) return prev;
@@ -110,8 +160,8 @@ export default function App() {
         if (stopObj) {
           if (next.size >= PORTFOLIO_STOPS.length) {
             showToast(
-              `⚡ 6/6 PROJECTS SEEN! SUPER POWER UNLOCKED: INDRA VAJRA SKY-LIGHTNING BOLT [Press Z]!`,
-              5500
+              `⚔ 6/6 PROJECTS SEEN! BOSS CHALLENGE CIRCLE & [Z] ⚡ SKY-LIGHTNING UNLOCKED — Head to the Northern Citadel to challenge the Layoff Boss!`,
+              6500
             );
           } else {
             showToast(
@@ -154,16 +204,22 @@ export default function App() {
 
   const handleBossDefeated = useCallback(() => {
     setActiveStopId(null);
+    setHypoGuideOpen(false);
+    setRecruiterTempleOpen(false);
     setGameState('gameover');
   }, []);
 
   const handlePlayerDied = useCallback(() => {
     setActiveStopId(null);
+    setHypoGuideOpen(false);
+    setRecruiterTempleOpen(false);
     setGameState('player_died');
   }, []);
 
   const handleRestartFromBeginning = useCallback(() => {
     setActiveStopId(null);
+    setHypoGuideOpen(false);
+    setRecruiterTempleOpen(false);
     setVisitedStopIds(new Set());
     setCollectedRelicIds(new Set());
     setBossAnnounced(false);
@@ -208,26 +264,52 @@ export default function App() {
   }, []);
 
   const handleTogglePause = useCallback(() => {
+    if (hypoGuideOpen) {
+      setHypoGuideOpen(false);
+      return;
+    }
+    if (recruiterTempleOpen) {
+      setRecruiterTempleOpen(false);
+      return;
+    }
     setActiveStopId(null);
     setGameState((prev) => {
       if (prev === 'playing') return 'paused';
       if (prev === 'paused') return 'playing';
       return prev;
     });
-  }, []);
+  }, [hypoGuideOpen, recruiterTempleOpen]);
 
   const handleResetSpawn = useCallback(() => {
     setActiveStopId(null);
+    setHypoGuideOpen(false);
+    setRecruiterTempleOpen(false);
     controllerRef.current?.resetToSpawn();
   }, []);
 
   const handleReturnToTitle = useCallback(() => {
     setActiveStopId(null);
+    setHypoGuideOpen(false);
+    setRecruiterTempleOpen(false);
     setGameState('title');
   }, []);
 
   const handleResumeFromMastery = useCallback(() => {
     setGameState('playing');
+  }, []);
+
+  const handleOpenHypoGuide = useCallback(() => {
+    setActiveStopId(null);
+    setRecruiterTempleOpen(false);
+    sound.playHypoVoiceChime();
+    setHypoGuideOpen(true);
+  }, []);
+
+  const handleOpenRecruiterTemple = useCallback(() => {
+    setActiveStopId(null);
+    setHypoGuideOpen(false);
+    sound.playTempleBell(528);
+    setRecruiterTempleOpen(true);
   }, []);
 
   const handleDispatchScroll = useCallback(
@@ -272,24 +354,33 @@ export default function App() {
   const activeStop = activeStopId
     ? PORTFOLIO_STOPS.find((s) => s.id === activeStopId) || null
     : null;
+  const anyOverlayOpen =
+    activeStopId || (recruiterTempleOpen ? 'modal-open' : null);
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-[#080b12] select-none">
       {/* Persistent Isolated WebGL 3D World Viewport */}
       <WorldCanvas
         gameState={gameState}
-        activeStopId={activeStopId}
+        activeStopId={anyOverlayOpen}
         visitedStopIds={visitedStopIds}
         collectedRelicIds={collectedRelicIds}
+        gameMode={gameMode}
         onTelemetryUpdate={setTelemetry}
         onInspectStop={handleInspectStop}
-        onCloseStop={handleCloseStop}
+        onCloseStop={() => {
+          handleCloseStop();
+          setHypoGuideOpen(false);
+          setRecruiterTempleOpen(false);
+        }}
         onCollectRelic={handleCollectRelic}
         onBossDefeated={handleBossDefeated}
         onPlayerDied={handlePlayerDied}
         onTogglePause={handleTogglePause}
         onStartFromTitle={handleStartFromTitle}
         onGamepadStatusChange={setGamepadConnected}
+        onOpenRecruiterTemple={handleOpenRecruiterTemple}
+        onOpenHypoGuide={handleOpenHypoGuide}
         controllerRef={controllerRef}
       />
 
@@ -298,9 +389,10 @@ export default function App() {
         <TitleScreen
           onStart={handleStartFromTitle}
           onInspectProject={(stopId) => {
-            handleStartFromTitle();
+            handleStartFromTitle('portfolio');
             handleTeleportToStop(stopId);
           }}
+          leaderboard={leaderboard}
           gamepadConnected={gamepadConnected}
         />
       )}
@@ -309,10 +401,11 @@ export default function App() {
       {gameState !== 'title' && (
         <HudOverlay
           gameState={gameState}
+          gameMode={gameMode}
           telemetry={telemetry}
           visitedStopIds={visitedStopIds}
           collectedRelicIds={collectedRelicIds}
-          activeStopId={activeStopId}
+          activeStopId={anyOverlayOpen}
           timeOfDay={timeOfDay}
           weatherPreset={weatherPreset}
           muted={muted}
@@ -336,9 +429,12 @@ export default function App() {
           onResetSpawn={handleResetSpawn}
           onRestartFromBeginning={handleRestartFromBeginning}
           onReturnToTitle={handleReturnToTitle}
+          onSaveScore={saveSurvivalScore}
           onResumeFromMastery={handleResumeFromMastery}
           onVirtualMove={(f, r) => controllerRef.current?.setVirtualInput(f, r)}
           onVirtualJump={() => controllerRef.current?.triggerVirtualJump()}
+          onOpenRecruiterTemple={handleOpenRecruiterTemple}
+          onOpenHypoGuide={handleOpenHypoGuide}
         />
       )}
 
@@ -353,6 +449,31 @@ export default function App() {
           onDispatchScroll={handleDispatchScroll}
         />
       )}
+
+      {/* Interactive Conversational Hypo AI Companion Dock */}
+      <HypoGuideModal
+        isOpen={hypoGuideOpen && gameState === 'playing'}
+        visitedStopIds={visitedStopIds}
+        collectedRelicIds={collectedRelicIds}
+        aliveDemonsCount={telemetry.aliveDemonsCount ?? 6}
+        bossDefeated={Boolean(telemetry.bossDefeated)}
+        onClose={() => setHypoGuideOpen(false)}
+        onTeleportToStop={handleTeleportToStop}
+        onTeleportToPoint={(x, z, label) => controllerRef.current?.teleportToPoint(x, z, label)}
+        onOpenRecruiterTemple={handleOpenRecruiterTemple}
+        onEquipWeapon={(weaponId) => controllerRef.current?.equipWeapon(weaponId)}
+        onSelectGuidanceTarget={(id, kind) => {
+          if (id && kind) controllerRef.current?.setGuidanceTarget(id, kind);
+        }}
+      />
+
+      {/* Southern Sankalpa Mandapa — Recruiter & Opportunity Temple Modal */}
+      <RecruiterTempleModal
+        isOpen={recruiterTempleOpen && gameState === 'playing'}
+        onClose={() => setRecruiterTempleOpen(false)}
+        dispatchedScrolls={dispatchedScrolls}
+        onDispatchScroll={handleDispatchScroll}
+      />
 
       {/* Mobile Landscape-Only Orientation Enforcement Gate */}
       <LandscapeOrientationGate />

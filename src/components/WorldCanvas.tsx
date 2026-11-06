@@ -7,12 +7,18 @@ import {
   STORY_CHAPTERS,
   FORGE_WEAPONS,
   LAYOFF_BOSS_CONFIG,
+  RECRUITER_TEMPLE_CONFIG,
+  HYPO_GUIDE_CONFIG,
   LotusRelic,
   WeaponId,
 } from '../data/portfolioStops';
 import {
   groundHeightAt,
   walkableSurfaceHeightAt,
+  isOnStoneSurfaceAt,
+  isNearRecruiterTemple,
+  isNearHypoGuide,
+  isInsideBossChallengeCircle,
   applyRadialDeadzone,
   computeMovementVector,
   computeParagliderPhysics,
@@ -45,6 +51,7 @@ import {
   WorldAffordanceMarker,
   EngagedDemonTelemetry,
 } from './HudOverlay';
+import { findNextGuidanceSanctum, SURVIVAL_ARENA_CENTER, SURVIVAL_ARENA_RADIUS, SURVIVAL_WAVE_SIZE, SURVIVAL_BASE_DEMON_HP, SURVIVAL_BASE_DEMON_DAMAGE } from '../game/worldLogic';
 
 export interface WorldControllerRef {
   teleportToStop: (stopId: string) => void;
@@ -70,6 +77,7 @@ interface WorldCanvasProps {
   activeStopId: string | null;
   visitedStopIds: Set<string>;
   collectedRelicIds: Set<string>;
+  gameMode: 'portfolio' | 'survival';
   onTelemetryUpdate: (telemetry: HudTelemetry) => void;
   onInspectStop: (stopId: string) => void;
   onCloseStop: () => void;
@@ -79,6 +87,8 @@ interface WorldCanvasProps {
   onTogglePause: () => void;
   onStartFromTitle: () => void;
   onGamepadStatusChange: (connected: boolean) => void;
+  onOpenRecruiterTemple?: () => void;
+  onOpenHypoGuide?: () => void;
   controllerRef: React.MutableRefObject<WorldControllerRef | null>;
 }
 
@@ -116,6 +126,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   onTogglePause,
   onStartFromTitle,
   onGamepadStatusChange,
+  onOpenRecruiterTemple,
+  onOpenHypoGuide,
   controllerRef,
 }) => {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -134,6 +146,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onTogglePause,
     onStartFromTitle,
     onGamepadStatusChange,
+    onOpenRecruiterTemple,
+    onOpenHypoGuide,
   });
 
   useEffect(() => {
@@ -142,6 +156,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       activeStopId,
       visitedStopIds,
       collectedRelicIds,
+      gameMode,
       onTelemetryUpdate,
       onInspectStop,
       onCloseStop,
@@ -151,6 +166,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       onTogglePause,
       onStartFromTitle,
       onGamepadStatusChange,
+      onOpenRecruiterTemple,
+      onOpenHypoGuide,
     };
     if (gameState !== 'playing' || activeStopId) {
       if (typeof document !== 'undefined' && document.pointerLockElement) {
@@ -175,6 +192,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onTogglePause,
     onStartFromTitle,
     onGamepadStatusChange,
+    onOpenRecruiterTemple,
+    onOpenHypoGuide,
   ]);
 
   useEffect(() => {
@@ -213,7 +232,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     renderer.domElement.style.height = '100%';
     container.appendChild(renderer.domElement);
 
-    const camera = new THREE.PerspectiveCamera(55, initialW / initialH, 0.2, 320);
+    const camera = new THREE.PerspectiveCamera(55, initialW / initialH, 0.2, 1600);
 
     // 2. Build Portfolio Verse 3D Scene + RoomEnvironment PMREM Reflections
     const world = buildAncientWorldScene(renderer, isSoftwareGl);
@@ -279,6 +298,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       combatCalloutTimer: 0,
       manualBossSummon: false,
       lightningCooldown: 0,
+      survivalWave: 0,
+      survivalScore: 0,
+      survivalWaveInProgress: false,
+      survivalWaveTimer: 0,
     };
 
     const camState = {
@@ -569,24 +592,31 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           demon.z += dz * inv * knockDist;
           world.particlePool.spawnBurst(demon.x, demon.y + 1.3, demon.z, 22, true);
 
-          if (demon.hp <= 0) {
-            demon.alive = false;
-            demon.group.visible = false;
-            sound.playDeathblow();
-            sound.playRelicChime(false);
-            playerState.hitStopTimer = 0.065;
-            camState.shakeIntensity = 0.28;
-            spawnFloatingPopup(
-              demon.x,
-              demon.y + 2.4,
-              demon.z,
-              `忍殺 -${dealtDmg}`,
-              'deathblow',
-              `${demon.name.toUpperCase()} SLAIN`
-            );
-            showCombatCallout(`忍殺 SHINOBI DEATHBLOW · ${demon.name.toUpperCase()} VANQUISHED!`, 2.2);
-            world.particlePool.spawnBurst(demon.x, demon.y + 1.5, demon.z, 38, true);
-          } else {
+            if (demon.hp <= 0) {
+              demon.alive = false;
+              demon.dyingTimer = 1.25;
+              if (stateRef.current.gameMode === 'survival') {
+                playerState.survivalScore += 150;
+              }
+              demon.deathVortexMesh.visible = true;
+              demon.deathVortexMesh.scale.setScalar(0.35);
+              demon.territoryRingMesh.visible = false;
+              sound.playDeathblow();
+              sound.playDemonVanish();
+              sound.playRelicChime(false);
+              playerState.hitStopTimer = 0.065;
+              camState.shakeIntensity = 0.28;
+              spawnFloatingPopup(
+                demon.x,
+                demon.y + 2.4,
+                demon.z,
+                `忍殺 -${dealtDmg}`,
+                'deathblow',
+                `${demon.name.toUpperCase()} VANQUISHED`
+              );
+              showCombatCallout(`忍殺 SHINOBI DEATHBLOW · ${demon.name.toUpperCase()} DISSOLVED!`, 2.4);
+              world.particlePool.spawnBurst(demon.x, demon.y + 1.5, demon.z, 36, true);
+            } else {
             sound.playDemonHit(false);
             playerState.hitStopTimer = stage === 3 ? 0.045 : 0.025;
             camState.shakeIntensity = stage === 3 ? 0.16 : 0.09;
@@ -697,6 +727,11 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // Super Power: Indra Vajra Sky-Lightning Bolt (Unlocked after all 6 Projects have been seen!) [Key Z]
     const performLightningBolt = () => {
       const unlockedCount = stateRef.current.visitedStopIds.size;
+      if (stateRef.current.gameMode === 'survival') {
+        sound.playPerilousWarning();
+        showCombatCallout('⚡ INDRA VAJRA SKY-LIGHTNING UNAVAILABLE IN SURVIVAL MODE', 2.2);
+        return;
+      }
       if (!canCastLightningBolt(unlockedCount)) {
         sound.playPerilousWarning();
         showCombatCallout(
@@ -795,9 +830,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const dealt = targetDemon.hp;
         targetDemon.hp = 0;
         targetDemon.alive = false;
-        targetDemon.group.visible = false;
+        targetDemon.dyingTimer = 1.25;
+        targetDemon.deathVortexMesh.visible = true;
+        targetDemon.deathVortexMesh.scale.setScalar(0.45);
+        targetDemon.territoryRingMesh.visible = false;
         sound.playDeathblow();
-        world.particlePool.spawnBurst(targetDemon.x, targetDemon.y + 1.5, targetDemon.z, 48, true);
+        sound.playDemonVanish();
+        world.particlePool.spawnBurst(targetDemon.x, targetDemon.y + 1.5, targetDemon.z, 40, true);
         spawnFloatingPopup(
           targetDemon.x,
           targetDemon.y + 2.8,
@@ -968,6 +1007,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         // Revive all 6 Corporate Asuras at full HP and home coordinates
         for (const demon of world.demons) {
           demon.alive = true;
+          demon.dyingTimer = 0;
           demon.hp = demon.maxHp;
           demon.posture = 0;
           demon.x = demon.homeX;
@@ -978,6 +1018,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           demon.attackCooldown = 0.8;
           demon.hitFlashTimer = 0;
           demon.group.visible = true;
+          demon.bodyGroup.position.y = 0;
+          demon.bodyGroup.scale.setScalar(demon.scale);
+          demon.deathVortexMesh.visible = false;
+          demon.territoryRingMesh.visible = true;
           demon.group.position.set(demon.x, demon.y, demon.z);
         }
 
@@ -1115,18 +1159,36 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           e.preventDefault();
           awakenAndFocusLayoffBoss();
         } else if (code === 'KeyE' || code === 'Enter') {
-          const nearForge = findNearestWeaponForge({ x: playerState.x, z: playerState.z });
-          if (nearForge.inRange) {
+          const playerPos2D = { x: playerState.x, z: playerState.z };
+          if (
+            isInsideBossChallengeCircle(playerPos2D).inRange &&
+            !world.layoffBoss.awakened &&
+            !world.layoffBoss.defeated
+          ) {
             e.preventDefault();
-            performEquipWeapon(nearForge.nearestWeapon.id);
+            awakenAndFocusLayoffBoss();
+          } else if (isNearHypoGuide(playerPos2D).inRange) {
+            e.preventDefault();
+            sound.playHypoVoiceChime();
+            stateRef.current.onOpenHypoGuide?.();
+          } else if (isNearRecruiterTemple(playerPos2D).inRange) {
+            e.preventDefault();
+            sound.playTempleBell(528);
+            stateRef.current.onOpenRecruiterTemple?.();
           } else {
-            const near = findNearestStop({ x: playerState.x, z: playerState.z });
-            if (near.inRange) {
+            const nearForge = findNearestWeaponForge(playerPos2D);
+            if (nearForge.inRange) {
               e.preventDefault();
-              if (stateRef.current.activeStopId === near.nearestStop.id) {
-                stateRef.current.onCloseStop();
-              } else {
-                stateRef.current.onInspectStop(near.nearestStop.id);
+              performEquipWeapon(nearForge.nearestWeapon.id);
+            } else {
+              const near = findNearestStop(playerPos2D);
+              if (near.inRange) {
+                e.preventDefault();
+                if (stateRef.current.activeStopId === near.nearestStop.id) {
+                  stateRef.current.onCloseStop();
+                } else {
+                  stateRef.current.onInspectStop(near.nearestStop.id);
+                }
               }
             }
           }
@@ -1147,7 +1209,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let touchStartClientY = 0;
     let touchMovedDist = 0;
 
-    // Direct 3D Raycast Picking on Monuments, Scroll Pedestals, Weapon Forges & Lotus Relics
+    // Direct 3D Raycast Picking on Hypo Guide, Recruiter Temple, Boss Challenge Circle, Monuments, Weapon Forges & Relics
     const _ndcPointer = new THREE.Vector2();
     const tryInteractWith3DWorldAtClientPoint = (clientX: number, clientY: number): boolean => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1156,7 +1218,45 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       _ndcPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       _raycaster.setFromCamera(_ndcPointer, camera);
       _raycaster.near = 0.2;
-      _raycaster.far = 55;
+      _raycaster.far = 75;
+
+      // 0A) Check Hypo the Interactive Guide Mascot
+      const hypoHits = _raycaster.intersectObject(world.hypoGuideGroup, true);
+      if (hypoHits.length > 0) {
+        sound.playHypoVoiceChime();
+        stateRef.current.onOpenHypoGuide?.();
+        return true;
+      }
+
+      // 0B) Check Southern Recruiter Opportunity Temple
+      const templeHits = _raycaster.intersectObject(world.recruiterTempleGroup, true);
+      if (templeHits.length > 0) {
+        const dist = Math.hypot(
+          RECRUITER_TEMPLE_CONFIG.position.x - playerState.x,
+          RECRUITER_TEMPLE_CONFIG.position.z - playerState.z
+        );
+        if (dist <= 16.0) {
+          sound.playTempleBell(528);
+          stateRef.current.onOpenRecruiterTemple?.();
+        } else {
+          controllerRef.current?.teleportToPoint(
+            RECRUITER_TEMPLE_CONFIG.position.x,
+            RECRUITER_TEMPLE_CONFIG.position.z - 6.2,
+            'Temple of Opportunities'
+          );
+          stateRef.current.onOpenRecruiterTemple?.();
+        }
+        return true;
+      }
+
+      // 0C) Check Northern Boss Challenge Circle / Hologram
+      if (world.bossLockHologramGroup.visible) {
+        const holoHits = _raycaster.intersectObject(world.bossLockHologramGroup, true);
+        if (holoHits.length > 0) {
+          awakenAndFocusLayoffBoss();
+          return true;
+        }
+      }
 
       // 1) Check Weapon Forges first (clicking a 3D Forge Altar equips or tracks that weapon)
       for (const wf of FORGE_WEAPONS) {
@@ -1412,6 +1512,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let lastTime = performance.now();
     let elapsedTotal = 0;
     let lastHudEmitTime = 0;
+    let lastGameStateInTick = gameState;
+    let lastGameModeInTick = gameMode;
 
     function afterDraw(cb: () => void) {
       if (isDisposed) return;
@@ -1544,10 +1646,47 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const activeStopIdNow = stateRef.current.activeStopId;
       const visitedStopsNow = stateRef.current.visitedStopIds;
       const collectedRelicsNow = stateRef.current.collectedRelicIds;
+      const currentGameMode = stateRef.current.gameMode;
 
       if (currentMode !== 'paused') {
         elapsedTotal += dt;
       }
+
+      // Detect transition to playing mode to position player correctly
+      if (currentMode === 'playing' && lastGameStateInTick !== 'playing') {
+        if (currentGameMode === 'survival') {
+          playerState.x = SURVIVAL_ARENA_CENTER.x;
+          playerState.z = SURVIVAL_ARENA_CENTER.z + 10; // Start at edge
+          playerState.y = walkableSurfaceHeightAt(playerState.x, playerState.z, 0);
+          playerState.vx = 0;
+          playerState.vz = 0;
+          playerState.vy = 0;
+          playerState.grounded = true;
+          playerState.yaw = Math.PI;
+          playerState.survivalWave = 0;
+          playerState.survivalScore = 0;
+          playerState.survivalWaveInProgress = false;
+          playerState.hp = playerState.maxHp;
+          // Deactivate all demons initially
+          for (const demon of world.demons) {
+            demon.alive = false;
+            demon.group.visible = false;
+          }
+        } else {
+          // Reset if starting portfolio from title
+          playerState.x = 0;
+          playerState.z = 8.2;
+          playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
+          playerState.vx = 0;
+          playerState.vz = 0;
+          playerState.vy = 0;
+          playerState.grounded = true;
+          playerState.yaw = Math.PI;
+          playerState.hp = playerState.maxHp;
+        }
+      }
+      lastGameStateInTick = currentMode;
+      lastGameModeInTick = currentGameMode;
 
       const gpInput = pollGamepad(frameDt);
 
@@ -1782,7 +1921,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               const stepDist = Math.hypot(resolved.x - playerState.x, resolved.z - playerState.z);
               playerState.x = resolved.x;
               playerState.z = resolved.z;
-              playerState.walkCycleDist += stepDist;
+              if (playerState.grounded && !playerState.isGliding) {
+                playerState.walkCycleDist += stepDist;
+              }
               playerState.distanceTraveled += stepDist;
             } else {
               // Slide along the platform edge instead of clipping inside it
@@ -1811,9 +1952,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               camState.yaw = dampAngle(camState.yaw, desiredCamYaw, 0.95, dt);
             }
 
-            if (playerState.grounded && playerState.walkCycleDist - playerState.lastStepDist > 1.85) {
+            if (playerState.grounded && playerState.walkCycleDist - playerState.lastStepDist > 1.38) {
               playerState.lastStepDist = playerState.walkCycleDist;
-              sound.playFootstep(isSprinting);
+              const onStone = isOnStoneSurfaceAt(playerState.x, playerState.z);
+              sound.playFootstep(isSprinting, onStone);
               world.particlePool.spawnBurst(playerState.x, playerState.y, playerState.z, 4, false);
             }
           } else {
@@ -1905,13 +2047,26 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         const speedRatio = Math.min(1, actualHorizontalSpeed / 8.5);
         const gaitPhase = playerState.walkCycleDist * 2.2;
         const swingAmp = 0.58 * speedRatio;
-        rig.leftLeg.rotation.x = Math.sin(gaitPhase) * swingAmp;
-        rig.rightLeg.rotation.x = -Math.sin(gaitPhase) * swingAmp;
-        rig.leftArm.rotation.x = -Math.sin(gaitPhase) * swingAmp * 0.85;
-        rig.cloakMesh.rotation.x =
-          0.14 +
-          Math.abs(Math.sin(gaitPhase)) * 0.18 * speedRatio +
-          (playerState.dodgeIframeTimer > 0 ? 0.35 : playerState.grounded ? 0 : 0.25);
+        if (playerState.isGliding || !playerState.grounded) {
+          const airBlend = 1 - Math.exp(-12 * dt);
+          const targetLeftLeg = playerState.isGliding ? -0.44 : -0.28;
+          const targetRightLeg = playerState.isGliding ? -0.26 : 0.22;
+          const targetLeftArm = playerState.isGliding ? -0.62 : -0.35;
+          rig.leftLeg.rotation.x = THREE.MathUtils.lerp(rig.leftLeg.rotation.x, targetLeftLeg, airBlend);
+          rig.rightLeg.rotation.x = THREE.MathUtils.lerp(rig.rightLeg.rotation.x, targetRightLeg, airBlend);
+          rig.leftArm.rotation.x = THREE.MathUtils.lerp(rig.leftArm.rotation.x, targetLeftArm, airBlend);
+          rig.cloakMesh.rotation.x = playerState.isGliding
+            ? 0.52 + Math.sin(elapsedTotal * 9.5) * 0.08
+            : 0.36;
+        } else {
+          rig.leftLeg.rotation.x = Math.sin(gaitPhase) * swingAmp;
+          rig.rightLeg.rotation.x = -Math.sin(gaitPhase) * swingAmp;
+          rig.leftArm.rotation.x = -Math.sin(gaitPhase) * swingAmp * 0.85;
+          rig.cloakMesh.rotation.x =
+            0.14 +
+            Math.abs(Math.sin(gaitPhase)) * 0.18 * speedRatio +
+            (playerState.dodgeIframeTimer > 0 ? 0.35 : 0);
+        }
 
         rig.shadowDisc.position.y = Math.max(0.015, surfaceYNow - playerState.y + 0.015);
         const heightAboveFloor = Math.max(0, playerState.y - surfaceYNow);
@@ -1926,8 +2081,96 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         let engagedDemonEntity: (typeof world.demons)[number] | null = null;
         let aliveDemonsCount = 0;
 
+        // Survival Mode Wave Management
+        if (gameMode === 'survival' && gameStateNow === 'playing' && !activeStopIdNow) {
+          const currentlyAlive = world.demons.filter(d => d.alive).length;
+          if (currentlyAlive === 0) {
+            if (!playerState.survivalWaveInProgress) {
+              playerState.survivalWaveInProgress = true;
+              playerState.survivalWaveTimer = 3.5; // Delay before next wave
+              if (playerState.survivalWave > 0) {
+                playerState.survivalScore += playerState.survivalWave * 1000;
+                showCombatCallout(`WAVE ${playerState.survivalWave} COMPLETE!`, 2.5);
+                sound.playRelicChime(true);
+              }
+            } else {
+              playerState.survivalWaveTimer -= dt;
+              if (playerState.survivalWaveTimer <= 0) {
+                playerState.survivalWave += 1;
+                playerState.survivalWaveInProgress = false;
+                
+                // Spawn new wave of demons
+                const waveCount = SURVIVAL_WAVE_SIZE;
+                const waveDifficulty = 1 + (playerState.survivalWave - 1) * 0.2;
+                
+                // Repurpose demons array if needed, but for now let's just reset/reactivate them
+                // and move them to the arena.
+                for (let i = 0; i < world.demons.length; i++) {
+                  const demon = world.demons[i];
+                  if (i < waveCount) {
+                    const angle = (i / waveCount) * Math.PI * 2;
+                    const spawnDist = 12 + Math.random() * 5;
+                    demon.homeX = SURVIVAL_ARENA_CENTER.x + Math.cos(angle) * spawnDist;
+                    demon.homeZ = SURVIVAL_ARENA_CENTER.z + Math.sin(angle) * spawnDist;
+                    demon.x = demon.homeX;
+                    demon.z = demon.homeZ;
+                    demon.y = walkableSurfaceHeightAt(demon.x, demon.z, 0);
+                    demon.alive = true;
+                    demon.hp = Math.round(SURVIVAL_BASE_DEMON_HP * waveDifficulty);
+                    demon.maxHp = demon.hp;
+                    demon.attackDamage = Math.round(SURVIVAL_BASE_DEMON_DAMAGE * waveDifficulty);
+                    demon.state = 'patrol';
+                    demon.group.visible = true;
+                    demon.bodyGroup.scale.setScalar(demon.scale * (1 + (playerState.survivalWave-1)*0.05));
+                    demon.dyingTimer = 0;
+                    demon.posture = 0;
+                    world.particlePool.spawnBurst(demon.x, demon.y + 1, demon.z, 12, true);
+                  } else {
+                    demon.alive = false;
+                    demon.group.visible = false;
+                  }
+                }
+                showCombatCallout(`SURVIVAL WAVE ${playerState.survivalWave} BEGINS!`, 3.0);
+                sound.playBossAwaken();
+              }
+            }
+          }
+        }
+
         for (const demon of world.demons) {
-          if (!demon.alive) continue;
+          if (!demon.alive) {
+            if (demon.dyingTimer > 0) {
+              demon.dyingTimer = Math.max(0, demon.dyingTimer - dt);
+              const vanishProgress = 1 - demon.dyingTimer / 1.25;
+              demon.bodyGroup.rotation.y += 12.5 * dt;
+              demon.bodyGroup.position.y = vanishProgress * 2.4;
+              demon.bodyGroup.scale.setScalar(
+                Math.max(0.02, demon.scale * (1 - vanishProgress * 0.94))
+              );
+              demon.deathVortexMesh.visible = true;
+              demon.deathVortexMesh.rotation.z += 9.5 * dt;
+              demon.deathVortexMesh.position.y = 0.2 + Math.sin(vanishProgress * Math.PI) * 1.35;
+              demon.deathVortexMesh.scale.setScalar(0.5 + vanishProgress * 1.9);
+              if (demon.deathVortexMesh.material instanceof THREE.MeshBasicMaterial) {
+                demon.deathVortexMesh.material.opacity = Math.max(0, (1 - vanishProgress) * 0.92);
+              }
+              if (Math.random() < 0.38) {
+                world.particlePool.spawnBurst(
+                  demon.x + (Math.random() - 0.5) * 1.2,
+                  demon.y + 0.8 + vanishProgress * 1.8,
+                  demon.z + (Math.random() - 0.5) * 1.2,
+                  3,
+                  true
+                );
+              }
+              if (demon.dyingTimer <= 0) {
+                demon.group.visible = false;
+                demon.deathVortexMesh.visible = false;
+                demon.bodyGroup.position.y = 0;
+              }
+            }
+            continue;
+          }
           aliveDemonsCount += 1;
 
           demon.hitFlashTimer = Math.max(0, demon.hitFlashTimer - dt);
@@ -1960,8 +2203,13 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             Boolean(activeStopIdNow)
           );
 
-          demon.x = aiStep.x;
-          demon.z = aiStep.z;
+          const resolvedDemon = resolveCollisions(
+            { x: aiStep.x, z: aiStep.z },
+            0.52,
+            colliders
+          );
+          demon.x = resolvedDemon.x;
+          demon.z = resolvedDemon.z;
           demon.yaw = aiStep.yaw;
           demon.state = aiStep.state;
           demon.stateTimer = aiStep.stateTimer;
@@ -2494,105 +2742,20 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
           camera.updateMatrixWorld();
 
-          // Project 3D Affordance Markers for Projects, Jewels, Weapons & Active Enemies
+          // Project 3D Affordance Markers ONLY for Engaged Enemies & Boss Citadel Seal (Zero mid-screen checkpoint clutter!)
           const affordanceMarkers: WorldAffordanceMarker[] = [];
 
-          // 1) Project Sanctums (within 52m or tracked)
-          for (const stop of PORTFOLIO_STOPS) {
-            const dist = Math.hypot(
-              stop.position.x - playerState.x,
-              stop.position.z - playerState.z
-            );
-            if (dist > 52 && resolvedTracked?.id !== stop.id) continue;
-            const stopY = groundHeightAt(stop.position.x, stop.position.z) + 5.8;
-            _projVec.set(stop.position.x, stopY, stop.position.z).project(camera);
-            if (_projVec.z >= -1 && _projVec.z <= 1) {
-              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
-              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
-                affordanceMarkers.push({
-                  id: stop.id,
-                  kind: 'project',
-                  xPct,
-                  yPct,
-                  distance: Math.round(dist),
-                  title: `${stop.indexNumber}. ${stop.title}`,
-                  subtitle: visitedStopsNow.has(stop.id)
-                    ? '✓ AWAKENED · [E] OPEN CODEX'
-                    : '[E] INSPECT · [G] GRAPPLE',
-                  accentColor: stop.accentColor,
-                  completed: visitedStopsNow.has(stop.id),
-                });
-              }
-            }
-          }
-
-          // 2) Uncollected Career Experience Jewels (within 40m or tracked)
-          for (const relic of LOTUS_RELICS) {
-            if (collectedRelicsNow.has(relic.id)) continue;
-            const dist = Math.hypot(
-              relic.position.x - playerState.x,
-              relic.position.z - playerState.z
-            );
-            if (dist > 40 && resolvedTracked?.id !== relic.id) continue;
-            const rY = groundHeightAt(relic.position.x, relic.position.z) + 2.35;
-            _projVec.set(relic.position.x, rY, relic.position.z).project(camera);
-            if (_projVec.z >= -1 && _projVec.z <= 1) {
-              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
-              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
-                affordanceMarkers.push({
-                  id: relic.id,
-                  kind: 'jewel',
-                  xPct,
-                  yPct,
-                  distance: Math.round(dist),
-                  title: `${relic.company} (${relic.era})`,
-                  subtitle: 'WALK OVER TO COLLECT JEWEL',
-                  accentColor: '#c084fc',
-                });
-              }
-            }
-          }
-
-          // 3) Weapon Forges (within 36m or tracked)
-          for (const wf of FORGE_WEAPONS) {
-            const dist = Math.hypot(wf.position.x - playerState.x, wf.position.z - playerState.z);
-            if (dist > 36 && resolvedTracked?.id !== wf.id) continue;
-            const wY = groundHeightAt(wf.position.x, wf.position.z) + 3.1;
-            _projVec.set(wf.position.x, wY, wf.position.z).project(camera);
-            if (_projVec.z >= -1 && _projVec.z <= 1) {
-              const xPct = (_projVec.x * 0.5 + 0.5) * 100;
-              const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 8 && xPct <= 92 && yPct >= 14 && yPct <= 84) {
-                const isEq = playerState.equippedWeaponId === wf.id;
-                affordanceMarkers.push({
-                  id: wf.id,
-                  kind: 'weapon',
-                  xPct,
-                  yPct,
-                  distance: Math.round(dist),
-                  title: wf.name,
-                  subtitle: isEq
-                    ? `★ EQUIPPED (+${wf.baseDamageBonus} ATK)`
-                    : `[E] EQUIP (+${wf.baseDamageBonus} ATK)`,
-                  accentColor: wf.colorHex,
-                  equipped: isEq,
-                });
-              }
-            }
-          }
-
-          // 4) Hostile Asura Enemies (within 16m or engaged — live decreasing HP & Posture bars!)
+          // 1) Hostile Asura Enemies (within 15m AND actively engaged/aggroed — live decreasing HP & Posture bars!)
           for (const demon of world.demons) {
             if (!demon.alive) continue;
             const dist = Math.hypot(demon.x - playerState.x, demon.z - playerState.z);
-            if (dist > 16 && demon.hp >= demon.maxHp) continue;
+            const isEngaged = demon.state !== 'patrol' || demon.hp < demon.maxHp;
+            if (!isEngaged || dist > 16) continue;
             _projVec.set(demon.x, demon.y + 2.9, demon.z).project(camera);
             if (_projVec.z >= -1 && _projVec.z <= 1) {
               const xPct = (_projVec.x * 0.5 + 0.5) * 100;
               const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-              if (xPct >= 18 && xPct <= 82 && yPct >= 18 && yPct <= 64) {
+              if (xPct >= 18 && xPct <= 82 && yPct >= 14 && yPct <= 68) {
                 affordanceMarkers.push({
                   id: demon.id,
                   kind: 'enemy',
@@ -2612,42 +2775,48 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             }
           }
 
-          // 5) Locked Boss Arena Hologram Affordance (guides from 14m–38m; steps aside within 14m so the 3D Hologram Billboard is 100% unobstructed)
-          if (visitedStopsNow.size < PORTFOLIO_STOPS.length && !boss.awakened && !boss.defeated) {
+          // 2) Boss Arena Hologram / Challenge Circle Affordance (docked cleanly in upper horizon band so it never blocks center gameplay)
+          if (!boss.awakened && !boss.defeated) {
             const holoDist = Math.hypot(0 - playerState.x, -45.8 - playerState.z);
-            if (holoDist > 14 && holoDist <= 38) {
+            if (holoDist > 12 && holoDist <= 48) {
               const holoY = groundHeightAt(0, -45.8) + 3.6;
               _projVec.set(0, holoY, -45.8).project(camera);
               if (_projVec.z >= -1 && _projVec.z <= 1) {
-                const xPct = (_projVec.x * 0.5 + 0.5) * 100;
-                const yPct = (-_projVec.y * 0.5 + 0.5) * 100;
-                if (xPct >= 8 && xPct <= 92 && yPct >= 10 && yPct <= 84) {
-                  affordanceMarkers.push({
-                    id: 'boss-lock-hologram',
-                    kind: 'boss_hologram',
-                    xPct,
-                    yPct,
-                    distance: Math.round(holoDist),
-                    title: 'Unlock fight after seeing all the projects',
-                    subtitle: `🔒 BOSS SEALED · ${visitedStopsNow.size}/6 PROJECTS SEEN`,
-                    accentColor: '#38bdf8',
-                  });
-                }
+                const xPct = THREE.MathUtils.clamp((_projVec.x * 0.5 + 0.5) * 100, 28, 72);
+                const yPct = THREE.MathUtils.clamp((-_projVec.y * 0.5 + 0.5) * 100, 10, 16);
+                const isUnlockedCircle = visitedStopsNow.size >= PORTFOLIO_STOPS.length;
+                affordanceMarkers.push({
+                  id: 'boss-lock-hologram',
+                  kind: 'boss_hologram',
+                  xPct,
+                  yPct,
+                  distance: Math.round(holoDist),
+                  title: isUnlockedCircle
+                    ? 'Enter Circle & Press [E] or [B] to Challenge the Layoff Boss'
+                    : 'Unlock fight after seeing all the projects',
+                  subtitle: isUnlockedCircle
+                    ? '⚔ BOSS CHALLENGE CIRCLE UNLOCKED · NORTHERN CITADEL'
+                    : `🔒 BOSS SEALED · ${visitedStopsNow.size}/6 PROJECTS SEEN`,
+                  accentColor: isUnlockedCircle ? '#f43f5e' : '#38bdf8',
+                });
               }
             }
           }
 
-          // Keep the screen clean by sorting by distance, restricting to central corridor, and capping count on mobile landscape
+          // Keep the screen clean by sorting by distance and capping count
           const isCompactLandscape = window.innerHeight < 520;
-          const maxMarkerCount = isCompactLandscape ? 2 : 4;
-          const maxMarkerDist = isCompactLandscape ? 20 : 28;
+          const maxMarkerCount = isCompactLandscape ? 2 : 3;
           affordanceMarkers.sort((a, b) => a.distance - b.distance);
           const trimmedMarkers: WorldAffordanceMarker[] = [];
           for (const candidate of affordanceMarkers) {
             if (trimmedMarkers.length >= maxMarkerCount) break;
-            if (candidate.distance > maxMarkerDist) continue;
+            const maxAllowedDist = candidate.kind === 'boss_hologram' ? 48 : isCompactLandscape ? 16 : 18;
+            if (candidate.distance > maxAllowedDist) continue;
             candidate.xPct = THREE.MathUtils.clamp(candidate.xPct, 24, 76);
-            candidate.yPct = THREE.MathUtils.clamp(candidate.yPct, 22, 56);
+            candidate.yPct =
+              candidate.kind === 'boss_hologram'
+                ? THREE.MathUtils.clamp(candidate.yPct, 10, 15)
+                : THREE.MathUtils.clamp(candidate.yPct, 18, 48);
             // Push apart badges that project too close together on screen
             for (const placed of trimmedMarkers) {
               if (Math.abs(candidate.xPct - placed.xPct) < 18 && Math.abs(candidate.yPct - placed.yPct) < 11) {
@@ -2711,8 +2880,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             ? STORY_CHAPTERS[1]
             : STORY_CHAPTERS[0];
 
-          const grappleCandidate = findBestGrappleTarget({ x: playerState.x, z: playerState.z });
-          const comboRank = computeComboRank(playerState.comboHitCount);
+          const nextGuidance = findNextGuidanceSanctum(playerPos2D, visitedStopsNow);
 
           stateRef.current.onTelemetryUpdate({
             x: playerState.x,
@@ -2722,6 +2890,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             nearStop,
             nearDistance: nearInfo.distance,
             nearWeaponForge,
+            nearRecruiterTemple: isNearRecruiterTemple(playerPos2D).inRange,
+            nearHypoGuide: isNearHypoGuide(playerPos2D).inRange,
+            nearBossChallengeCircle:
+              isInsideBossChallengeCircle(playerPos2D).inRange && !boss.awakened && !boss.defeated,
             equippedWeaponId: playerState.equippedWeaponId,
             equippedWeaponName: combatStats.equippedWeapon.name,
             trackedTarget: resolvedTracked,
@@ -2761,6 +2933,12 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             combatPopups: projectedPopups,
             affordanceMarkers: trimmedMarkers,
             waypointScreen: null,
+            survivalWave: playerState.survivalWave,
+            survivalScore: playerState.survivalScore,
+            nextGuidanceSanctum: nextGuidance ? {
+              title: nextGuidance.stop.title,
+              distance: Math.round(nextGuidance.distance)
+            } : null,
           });
         }
       }
