@@ -6,6 +6,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /_healthcheck/{docId} {
+      allow read: if true;
+    }
+
     // Helper functions
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');

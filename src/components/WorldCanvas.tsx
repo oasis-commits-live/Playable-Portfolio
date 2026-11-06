@@ -117,6 +117,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   activeStopId,
   visitedStopIds,
   collectedRelicIds,
+  gameMode,
   onTelemetryUpdate,
   onInspectStop,
   onCloseStop,
@@ -137,6 +138,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     activeStopId,
     visitedStopIds,
     collectedRelicIds,
+    gameMode,
     onTelemetryUpdate,
     onInspectStop,
     onCloseStop,
@@ -194,6 +196,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onGamepadStatusChange,
     onOpenRecruiterTemple,
     onOpenHypoGuide,
+    gameMode,
   ]);
 
   useEffect(() => {
@@ -1647,6 +1650,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const visitedStopsNow = stateRef.current.visitedStopIds;
       const collectedRelicsNow = stateRef.current.collectedRelicIds;
       const currentGameMode = stateRef.current.gameMode;
+      const playerPos2D = { x: playerState.x, z: playerState.z };
 
       if (currentMode !== 'paused') {
         elapsedTotal += dt;
@@ -2082,7 +2086,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         let aliveDemonsCount = 0;
 
         // Survival Mode Wave Management
-        if (gameMode === 'survival' && gameStateNow === 'playing' && !activeStopIdNow) {
+        if (currentGameMode === 'survival' && currentMode === 'playing' && !activeStopIdNow) {
           const currentlyAlive = world.demons.filter(d => d.alive).length;
           if (currentlyAlive === 0) {
             if (!playerState.survivalWaveInProgress) {
@@ -2848,6 +2852,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               distance: Math.round(nearestDemonDist),
             };
           }
+
+          const comboRank = computeComboRank(playerState.comboHitCount);
+          const grappleCandidate = findBestGrappleTarget(playerPos2D);
+          const inCombatNow = engagedDemonHud !== null || (boss.awakened && !boss.defeated) || playerState.outOfCombatTimer > 0;
 
           // Project active 3D combat damage popups to screen space
           const projectedPopups: CombatFloatingPopup[] = [];

@@ -708,7 +708,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                               if (onInspectProject) {
                                 onInspectProject(s.id);
                               } else {
-                                onStart();
+                                onStart('portfolio');
                               }
                             }}
                             className="flex-1 px-2.5 py-1.5 bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-hud text-[10px] font-bold uppercase tracking-wider text-center cursor-pointer"
