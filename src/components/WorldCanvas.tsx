@@ -51,6 +51,7 @@ import {
   WorldAffordanceMarker,
   EngagedDemonTelemetry,
 } from './HudOverlay';
+import { findNextGuidanceSanctum } from '../game/worldLogic';
 
 export interface WorldControllerRef {
   teleportToStop: (stopId: string) => void;
@@ -585,28 +586,29 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
           demon.z += dz * inv * knockDist;
           world.particlePool.spawnBurst(demon.x, demon.y + 1.3, demon.z, 22, true);
 
-          if (demon.hp <= 0) {
-            demon.alive = false;
-            demon.dyingTimer = 1.25;
-            demon.deathVortexMesh.visible = true;
-            demon.deathVortexMesh.scale.setScalar(0.35);
-            demon.territoryRingMesh.visible = false;
-            sound.playDeathblow();
-            sound.playDemonVanish();
-            sound.playRelicChime(false);
-            playerState.hitStopTimer = 0.065;
-            camState.shakeIntensity = 0.28;
-            spawnFloatingPopup(
-              demon.x,
-              demon.y + 2.4,
-              demon.z,
-              `忍殺 -${dealtDmg}`,
-              'deathblow',
-              `${demon.name.toUpperCase()} VANQUISHED`
-            );
-            showCombatCallout(`忍殺 SHINOBI DEATHBLOW · ${demon.name.toUpperCase()} DISSOLVED!`, 2.4);
-            world.particlePool.spawnBurst(demon.x, demon.y + 1.5, demon.z, 36, true);
-          } else {
+            if (demon.hp <= 0) {
+              demon.alive = false;
+              demon.dyingTimer = 1.25;
+              demon.dyingTimer = 1.25;
+              demon.deathVortexMesh.visible = true;
+              demon.deathVortexMesh.scale.setScalar(0.35);
+              demon.territoryRingMesh.visible = false;
+              sound.playDeathblow();
+              sound.playDemonVanish();
+              sound.playRelicChime(false);
+              playerState.hitStopTimer = 0.065;
+              camState.shakeIntensity = 0.28;
+              spawnFloatingPopup(
+                demon.x,
+                demon.y + 2.4,
+                demon.z,
+                `忍殺 -${dealtDmg}`,
+                'deathblow',
+                `${demon.name.toUpperCase()} VANQUISHED`
+              );
+              showCombatCallout(`忍殺 SHINOBI DEATHBLOW · ${demon.name.toUpperCase()} DISSOLVED!`, 2.4);
+              world.particlePool.spawnBurst(demon.x, demon.y + 1.5, demon.z, 36, true);
+            } else {
             sound.playDemonHit(false);
             playerState.hitStopTimer = stage === 3 ? 0.045 : 0.025;
             camState.shakeIntensity = stage === 3 ? 0.16 : 0.09;
@@ -1497,6 +1499,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let lastTime = performance.now();
     let elapsedTotal = 0;
     let lastHudEmitTime = 0;
+    let lastGameStateInTick = gameState;
 
     function afterDraw(cb: () => void) {
       if (isDisposed) return;
@@ -1629,10 +1632,27 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const activeStopIdNow = stateRef.current.activeStopId;
       const visitedStopsNow = stateRef.current.visitedStopIds;
       const collectedRelicsNow = stateRef.current.collectedRelicIds;
+      const currentActiveStop = stateRef.current.activeStopId;
+      const playerPos2D = { x: playerState.x, z: playerState.z };
 
       if (currentMode !== 'paused') {
         elapsedTotal += dt;
       }
+
+      // Detect transition to playing mode to position player correctly
+      if (currentMode === 'playing' && lastGameStateInTick !== 'playing') {
+        // Reset if starting portfolio from title
+        playerState.x = 0;
+        playerState.z = 8.2;
+        playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
+        playerState.vx = 0;
+        playerState.vz = 0;
+        playerState.vy = 0;
+        playerState.grounded = true;
+        playerState.yaw = Math.PI;
+        playerState.hp = playerState.maxHp;
+      }
+      lastGameStateInTick = currentMode;
 
       const gpInput = pollGamepad(frameDt);
 
@@ -2026,6 +2046,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         let nearestDemonName: string | null = null;
         let engagedDemonEntity: (typeof world.demons)[number] | null = null;
         let aliveDemonsCount = 0;
+
+        // Demons logic remains for standard portfolio encounters
 
         for (const demon of world.demons) {
           if (!demon.alive) {
@@ -2739,6 +2761,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             };
           }
 
+          const comboRank = computeComboRank(playerState.comboHitCount);
+          const grappleCandidate = findBestGrappleTarget(playerPos2D);
+          const inCombatNow = engagedDemonHud !== null || (boss.awakened && !boss.defeated) || playerState.outOfCombatTimer > 0;
+
           // Project active 3D combat damage popups to screen space
           const projectedPopups: CombatFloatingPopup[] = [];
           for (const pop of activePopups) {
@@ -2770,9 +2796,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             ? STORY_CHAPTERS[1]
             : STORY_CHAPTERS[0];
 
-          const grappleCandidate = findBestGrappleTarget({ x: playerState.x, z: playerState.z });
-          const comboRank = computeComboRank(playerState.comboHitCount);
-          const playerPos2D = { x: playerState.x, z: playerState.z };
+          const nextGuidance = findNextGuidanceSanctum(playerPos2D, visitedStopsNow);
 
           stateRef.current.onTelemetryUpdate({
             x: playerState.x,
@@ -2825,6 +2849,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             combatPopups: projectedPopups,
             affordanceMarkers: trimmedMarkers,
             waypointScreen: null,
+            nextGuidanceSanctum: nextGuidance ? {
+              title: nextGuidance.stop.title,
+              distance: Math.round(nextGuidance.distance)
+            } : null,
           });
         }
       }

@@ -168,11 +168,15 @@ interface MobileRpgControlPadProps {
   onTriggerDash?: () => void;
   onTriggerGrapple: () => void;
   onInteractContext?: () => void;
+  onTogglePause?: () => void;
+  onCycleWeapon?: () => void;
+  onCycleTime?: () => void;
   contextActionLabel?: string | null;
   comboStage?: 1 | 2 | 3;
   grappleAvailable?: boolean;
   isGliding?: boolean;
   lightningUnlocked?: boolean;
+  lightningCooldown?: number;
   unlockedProjectsCount?: number;
 }
 
@@ -190,11 +194,15 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
   onTriggerDash,
   onTriggerGrapple,
   onInteractContext,
+  onTogglePause,
+  onCycleWeapon,
+  onCycleTime,
   contextActionLabel,
   comboStage = 1,
   grappleAvailable = false,
   isGliding = false,
   lightningUnlocked = false,
+  lightningCooldown = 0,
   unlockedProjectsCount = 0,
 }) => {
   const padRef = useRef<HTMLDivElement | null>(null);
@@ -297,40 +305,17 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
             isDraggingStick || activeDpadDir ? 'border-[#d4af37]' : 'border-[#d4af37]/50'
           }`}
         >
-          {/* Sacred Geometric Compass Etching Inside Joystick Base */}
           <svg
             width="110"
             height="110"
             viewBox="0 0 110 110"
-            className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
+            className="absolute inset-0 w-full h-full pointer-events-none opacity-20"
             aria-hidden="true"
           >
-            <circle
-              cx="55"
-              cy="55"
-              r="46"
-              fill="none"
-              stroke="#d4af37"
-              strokeWidth="1"
-              strokeDasharray="4 3"
-            />
-            <circle cx="55" cy="55" r="24" fill="none" stroke="#38bdf8" strokeWidth="0.8" />
-            <line x1="55" y1="8" x2="55" y2="22" stroke="#d4af37" strokeWidth="1.2" />
-            <line x1="55" y1="88" x2="55" y2="102" stroke="#d4af37" strokeWidth="1.2" />
-            <line x1="8" y1="55" x2="22" y2="55" stroke="#d4af37" strokeWidth="1.2" />
-            <line x1="88" y1="55" x2="102" y2="55" stroke="#d4af37" strokeWidth="1.2" />
-            {/* Active deflection vector line */}
-            {(Math.abs(knobOffset.x) > 2 || Math.abs(knobOffset.y) > 2) && (
-              <line
-                x1="55"
-                y1="55"
-                x2={55 + knobOffset.x}
-                y2={55 + knobOffset.y}
-                stroke="#fef08a"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-            )}
+            <circle cx="55" cy="55" r="46" fill="none" stroke="white" strokeWidth="0.5" />
+            <circle cx="55" cy="55" r="24" fill="none" stroke="white" strokeWidth="0.5" />
+            <line x1="55" y1="0" x2="55" y2="110" stroke="white" strokeWidth="0.5" />
+            <line x1="0" y1="55" x2="110" y2="55" stroke="white" strokeWidth="0.5" />
           </svg>
 
           {/* 4-Way Discrete D-Pad Quadrant Buttons for Tap/Hold Precision */}
@@ -393,14 +378,14 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
             ▶
           </button>
 
-          {/* Draggable 360° Golden Chakra Thumbstick Knob */}
+          {/* 360° Glass Thumbstick Knob */}
           <div
-            className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-[#d4af37] via-[#b48628] to-[#78350f] border-2 border-[#fef08a] shadow-[0_0_18px_rgba(212,175,55,0.65)] flex items-center justify-center pointer-events-none transition-transform duration-75"
+            className="relative w-12 h-12 rounded-full glass-panel flex items-center justify-center pointer-events-none border-white/20 shadow-xl"
             style={{
               transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
             }}
           >
-            <div className="w-4 h-4 rotate-45 border border-[#05070b] bg-[#fef08a]/90" />
+            <div className="w-2 h-2 rounded-full bg-[#d4af37] shadow-[0_0_8px_#d4af37]" />
           </div>
         </div>
         <span className="mt-1 font-mono text-[8px] uppercase tracking-[0.2em] text-[#94a3b8]/80 pointer-events-none">
@@ -508,31 +493,12 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
           </span>
         </button>
 
-        {/* Arc Slot 4 (Top-Right): SURYA WHIRLWIND NOVA ULTIMATE */}
+        {/* Nova Ultimate */}
         <button
-          type="button"
-          aria-label="RPG Pad Whirlwind Nova"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onTriggerAttack(true);
-          }}
-          className="pointer-events-auto absolute right-1 bottom-[88px] sm:right-1.5 sm:bottom-[98px] w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#240713]/92 hover:bg-[#3d0c21] active:scale-90 border-2 border-[#f43f5e] shadow-[0_6px_20px_rgba(244,63,94,0.4)] flex flex-col items-center justify-center cursor-pointer transition-transform"
-          title="360° Surya Whirlwind Nova [Key Q]"
+          onPointerDown={(e) => { e.stopPropagation(); onTriggerAttack(true); }}
+          className="pointer-events-auto absolute right-2 bottom-[90px] w-10 h-10 rounded-full glass-panel border-[#f43f5e]/30 flex items-center justify-center"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle
-              cx="12"
-              cy="12"
-              r="7"
-              stroke="#f43f5e"
-              strokeWidth="2"
-              fill="rgba(244, 63, 94, 0.22)"
-            />
-            <polygon points="12,3 15,12 12,21 9,12" fill="#fda4af" />
-          </svg>
-          <span className="font-hud text-[8px] font-bold tracking-wider uppercase text-[#fecdd3] leading-none mt-0.5">
-            NOVA
-          </span>
+          <div className="w-1.5 h-1.5 rounded-full bg-[#f43f5e] animate-ping" />
         </button>
 
         {/* Elevated Grapple Hook Medallion */}
@@ -583,39 +549,13 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
           </button>
         )}
 
-        {/* PRIMARY LARGE ATTACK MEDALLION (Bottom-Right Corner Anchor) */}
+        {/* PRIMARY SLASH */}
         <button
-          type="button"
-          aria-label="RPG Pad Primary Slash"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onTriggerAttack(false);
-          }}
-          className="pointer-events-auto absolute right-1 bottom-1 w-[68px] h-[68px] sm:w-[76px] sm:h-[76px] rounded-full bg-gradient-to-br from-[#d4af37] via-[#b48628] to-[#78350f] hover:brightness-110 active:scale-90 border-[3px] border-[#fef08a] shadow-[0_0_28px_rgba(212,175,55,0.65)] flex flex-col items-center justify-center cursor-pointer transition-transform"
-          title="Primary 3-Stage Weapon Slash [LMB / F]"
+          onPointerDown={(e) => { e.stopPropagation(); onTriggerAttack(false); }}
+          className="pointer-events-auto absolute right-0 bottom-0 w-20 h-20 rounded-full glass-panel border-[#d4af37]/40 flex flex-col items-center justify-center shadow-2xl"
         >
-          <div className="absolute inset-1 rounded-full border border-[#05070b]/40 pointer-events-none" />
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M19 5L5 19M19 5H13M19 5V11"
-              stroke="#05070b"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M14.5 9.5L9.5 14.5"
-              stroke="#fef08a"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-          <span className="font-hud text-[10px] font-extrabold tracking-[0.16em] uppercase text-[#05070b] leading-none mt-0.5">
-            SLASH
-          </span>
-          <span className="font-mono text-[7px] font-bold text-[#05070b]/80 leading-none">
-            STAGE {comboStage === 3 ? 'III' : comboStage === 2 ? 'II' : 'I'}
-          </span>
+          <span className="font-hud text-[11px] font-bold text-[#d4af37] tracking-[0.2em] uppercase">Slash</span>
+          <span className="font-mono text-[7px] text-white/30">Stage {comboStage}</span>
         </button>
       </div>
     </>

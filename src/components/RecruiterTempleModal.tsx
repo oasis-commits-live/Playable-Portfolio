@@ -167,219 +167,189 @@ export const RecruiterTempleModal: React.FC<RecruiterTempleModalProps> = ({
         </header>
 
         {/* Main 12-Column Architectural Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="p-5 sm:p-8 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* LEFT COLUMN (5 Cols): Executive Designer Profile & Direct Channels */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
-            <div className="space-y-4">
-              {/* Candidate Dossier Block */}
-              <div className="p-4 bg-[#0b1220] border border-[#d4af37]/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#d4af37]">
-                    CANDIDATE DOSSIER
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-[#062421] border border-[#2dd4bf]/40 font-mono text-[9px] text-[#2dd4bf] uppercase">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#2dd4bf]" />
-                    Open to Roles
-                  </span>
-                </div>
-
-                <div>
-                  <h3 className="font-display text-xl sm:text-2xl font-bold text-[#fef08a]">
-                    {CREATOR_PROFILE.name}
-                  </h3>
-                  <p className="font-sans text-xs text-[#cbd5e1] mt-1 leading-relaxed">
-                    Senior Product Designer specializing in 0→1 Agentic AI Workspaces, B2B FinTech
-                    Automation, and Interactive Systems.
-                  </p>
-                </div>
-
-                {/* 3 Key Impact Metrics */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#d4af37]/20">
-                  {IMPACT_HIGHLIGHTS.map((item, i) => (
-                    <div key={i} className="p-2 bg-[#070c16] border border-[#d4af37]/15">
-                      <div className="font-hud text-xs sm:text-sm font-bold text-[#2dd4bf]">
-                        {item.metric}
-                      </div>
-                      <div className="font-sans text-[10px] text-[#94a3b8] leading-tight mt-0.5">
-                        {item.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Direct Executive Channels (Clean Stacked Cards — Zero Jumbled Buttons) */}
-              <div className="space-y-2">
-                <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#94a3b8]">
-                  DIRECT CHANNELS &amp; CREDENTIALS
-                </div>
-
-                {/* Channel 1: Direct Email + Copy */}
-                <div className="p-3 bg-[#0b1220] border border-[#d4af37]/35 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-mono text-[9px] uppercase tracking-wider text-[#d4af37]">
-                      DIRECT ELECTRONIC MAIL
-                    </div>
-                    <div className="font-mono text-xs font-bold text-[#f8f5ee] truncate mt-0.5">
-                      {CREATOR_PROFILE.email}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleCopyEmail}
-                      className="px-2.5 py-1 bg-[#111c30] hover:bg-[#1b2c4a] border border-[#d4af37]/35 font-mono text-[10px] text-[#cbd5e1] uppercase cursor-pointer"
-                    >
-                      {copiedEmail ? 'COPIED ✓' : 'COPY'}
-                    </button>
-                    <a
-                      href={`mailto:${CREATOR_PROFILE.email}?subject=${encodeURIComponent(
-                        'Senior Product Designer Opportunity — via Portfolio Verse'
-                      )}`}
-                      data-testid="temple-direct-mailto-link"
-                      className="px-3 py-1 bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-[10px] font-extrabold uppercase tracking-wider cursor-pointer"
-                    >
-                      MAIL →
-                    </a>
-                  </div>
-                </div>
-
-                {/* Channel 2: 15-Min Discovery Call */}
-                <a
-                  href={CREATOR_PROFILE.calUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-3 bg-[#0b1220] hover:bg-[#101c30] border border-[#2dd4bf]/35 flex items-center justify-between gap-3 transition-colors cursor-pointer"
-                >
-                  <div>
-                    <div className="font-mono text-[9px] uppercase tracking-wider text-[#2dd4bf]">
-                      INSTANT CALENDAR BOOKING
-                    </div>
-                    <div className="font-sans text-xs font-semibold text-[#f8f5ee] mt-0.5">
-                      Schedule a 15-Minute Intro Call (Cal.com)
-                    </div>
-                  </div>
-                  <span className="px-3 py-1 bg-[#06242a] border border-[#2dd4bf]/50 font-hud text-[10px] font-bold text-[#2dd4bf] uppercase tracking-wider shrink-0">
-                    BOOK →
-                  </span>
-                </a>
-
-                {/* Channel 3: Official 2026 PDF Resume */}
-                <a
-                  href={CREATOR_PROFILE.resumeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-3 bg-[#0b1220] hover:bg-[#101c30] border border-[#d4af37]/30 flex items-center justify-between gap-3 transition-colors cursor-pointer"
-                >
-                  <div>
-                    <div className="font-mono text-[9px] uppercase tracking-wider text-[#fef08a]">
-                      CURRICULUM VITAE (PDF)
-                    </div>
-                    <div className="font-sans text-xs font-semibold text-[#f8f5ee] mt-0.5">
-                      Ayush Dubey — Senior Product Designer 2026
-                    </div>
-                  </div>
-                  <span className="px-3 py-1 bg-[#161e31] border border-[#d4af37]/45 font-hud text-[10px] font-bold text-[#fef08a] uppercase tracking-wider shrink-0">
-                    OPEN PDF ↗
-                  </span>
-                </a>
-              </div>
-            </div>
-
-            {/* Live Temple Ledger Summary */}
-            <div className="p-3.5 bg-[#090f1c] border border-[#2dd4bf]/25 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#2dd4bf]">
-                  SEALED TEMPLE LEDGER ({dispatchedScrolls.length})
+          <div className="lg:col-span-5 space-y-6">
+            {/* Candidate Dossier Block */}
+            <div className="p-5 bg-[#0b1220] border border-[#d4af37]/30 shadow-lg">
+              <div className="flex items-center justify-between mb-4">
+                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#d4af37]">
+                  CANDIDATE DOSSIER
                 </span>
-                <span className="font-mono text-[9px] text-[#64748b] uppercase">
-                  VERIFIED OFFERS
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#062421] border border-[#2dd4bf]/40 font-mono text-[9px] text-[#2dd4bf] uppercase font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2dd4bf] shadow-[0_0_8px_#2dd4bf]" />
+                  Open to Roles
                 </span>
               </div>
-              <div className="space-y-1.5 max-h-[88px] overflow-y-auto pr-1">
-                {dispatchedScrolls.map((scroll, idx) => (
-                  <div
-                    key={idx}
-                    className="p-2 bg-[#060a12] border border-[#d4af37]/20 space-y-0.5"
-                  >
-                    <div className="flex items-center justify-between text-[10px] font-mono">
-                      <span className="text-[#fef08a] font-semibold truncate">
-                        {scroll.sender} · {scroll.organization}
-                      </span>
-                      <span className="text-[#2dd4bf] shrink-0">{scroll.timestamp}</span>
+
+              <h3 className="font-display text-2xl sm:text-3xl font-bold text-[#fef08a] leading-tight">
+                {CREATOR_PROFILE.name}
+              </h3>
+              <p className="font-sans text-sm text-[#cbd5e1] mt-2 leading-relaxed opacity-90">
+                Senior Product Designer specializing in 0→1 Agentic AI Workspaces, B2B FinTech
+                Automation, and Interactive Systems.
+              </p>
+
+              {/* 3 Key Impact Metrics */}
+              <div className="grid grid-cols-3 gap-3 pt-5 mt-5 border-t border-[#d4af37]/20">
+                {IMPACT_HIGHLIGHTS.map((item, i) => (
+                  <div key={i} className="text-center">
+                    <div className="font-hud text-lg font-black text-[#2dd4bf]">
+                      {item.metric}
                     </div>
-                    <p className="text-[11px] text-[#94a3b8] line-clamp-1 leading-snug">
-                      {scroll.message}
-                    </p>
+                    <div className="font-sans text-[9px] text-[#94a3b8] uppercase tracking-wider leading-tight mt-1">
+                      {item.label}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* Direct Executive Channels */}
+            <div className="space-y-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#94a3b8] px-1">
+                DIRECT CHANNELS
+              </div>
+
+              {/* Channel 1: Direct Email */}
+              <div className="group p-4 bg-[#0b1220] border border-[#d4af37]/25 hover:border-[#d4af37]/50 transition-all flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-[#d4af37] opacity-80">
+                    ELECTRONIC MAIL
+                  </div>
+                  <div className="font-mono text-sm font-bold text-[#f8f5ee] truncate mt-0.5">
+                    {CREATOR_PROFILE.email}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCopyEmail}
+                    className="p-2 bg-[#111c30] hover:bg-[#1b2c4a] border border-[#d4af37]/35 font-mono text-[10px] text-[#cbd5e1] uppercase cursor-pointer transition-colors"
+                  >
+                    {copiedEmail ? 'COPIED' : 'COPY'}
+                  </button>
+                  <a
+                    href={`mailto:${CREATOR_PROFILE.email}?subject=${encodeURIComponent(
+                      'Senior Product Designer Opportunity — via Portfolio Verse'
+                    )}`}
+                    className="px-4 py-2 bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-[11px] font-black uppercase tracking-wider cursor-pointer transition-transform active:scale-95"
+                  >
+                    MAIL →
+                  </a>
+                </div>
+              </div>
+
+              {/* Channel 2: 15-Min Discovery Call */}
+              <a
+                href={CREATOR_PROFILE.calUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group p-4 bg-[#0b1220] hover:bg-[#121c32] border border-[#2dd4bf]/25 hover:border-[#2dd4bf]/50 transition-all flex items-center justify-between gap-4 cursor-pointer"
+              >
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-[#2dd4bf] opacity-80">
+                    CALENDAR BOOKING
+                  </div>
+                  <div className="font-sans text-sm font-bold text-[#f8f5ee] mt-0.5">
+                    Schedule 15-Min Intro Call
+                  </div>
+                </div>
+                <span className="px-4 py-2 bg-[#06242a] border border-[#2dd4bf]/50 font-hud text-[11px] font-black text-[#2dd4bf] uppercase tracking-wider shrink-0 transition-colors group-hover:bg-[#0b3d45]">
+                  BOOK →
+                </span>
+              </a>
+
+              {/* Channel 3: Official 2026 PDF Resume */}
+              <a
+                href={CREATOR_PROFILE.resumeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group p-4 bg-[#0b1220] hover:bg-[#151b2a] border border-[#d4af37]/20 hover:border-[#d4af37]/45 transition-all flex items-center justify-between gap-4 cursor-pointer"
+              >
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-[#fef08a] opacity-80">
+                    CURRICULUM VITAE
+                  </div>
+                  <div className="font-sans text-sm font-bold text-[#f8f5ee] mt-0.5">
+                    Designer Portfolio PDF
+                  </div>
+                </div>
+                <span className="px-4 py-2 bg-[#161e31] border border-[#d4af37]/45 font-hud text-[11px] font-black text-[#fef08a] uppercase tracking-wider shrink-0 transition-colors group-hover:bg-[#1e2a44]">
+                  OPEN ↗
+                </span>
+              </a>
+            </div>
           </div>
 
           {/* RIGHT COLUMN (7 Cols): Structured Opportunity Offer Composer */}
-          <div className="lg:col-span-7 bg-[#0b1220] border border-[#d4af37]/35 p-5 flex flex-col justify-between space-y-4">
-            <div className="space-y-4">
-              <div className="border-b border-[#d4af37]/20 pb-2.5 flex items-center justify-between">
+          <div className="lg:col-span-7 bg-[#0b1220]/80 border border-[#d4af37]/35 p-6 flex flex-col justify-between shadow-2xl relative">
+            <div className="space-y-6">
+              <div className="border-b border-[#d4af37]/20 pb-4 flex items-end justify-between">
                 <div>
                   <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#d4af37]">
-                    OPPORTUNITY DISPATCH SCROLL
+                    OPPORTUNITY DISPATCH
                   </div>
-                  <h3 className="font-display text-lg font-bold text-[#f8f5ee] mt-0.5">
-                    Extend an Opportunity or Interview Invitation
+                  <h3 className="font-display text-xl font-bold text-[#f8f5ee] mt-1">
+                    Extend an Invitation
                   </h3>
                 </div>
-                <span className="font-mono text-[10px] text-[#2dd4bf] uppercase">
-                  STEP ONTO THE ALTAR
-                </span>
+                <div className="text-right">
+                  <div className="font-mono text-[9px] text-[#2dd4bf] uppercase font-bold tracking-widest">
+                    TEMPLE LEDGER
+                  </div>
+                  <div className="font-hud text-lg font-black text-[#2dd4bf]">
+                    {dispatchedScrolls.length}
+                  </div>
+                </div>
               </div>
 
               {sealedSuccessBanner && (
                 <div
                   data-testid="temple-dispatch-confirmation"
-                  className="p-3 bg-[#062421] border border-[#2dd4bf] text-[#ccfbf1] text-xs flex items-center justify-between gap-3"
+                  className="p-4 bg-[#062421] border border-[#2dd4bf] text-[#ccfbf1] text-sm flex items-center justify-between gap-3 animate-fade-in"
                 >
-                  <span className="font-medium">{sealedSuccessBanner}</span>
-                  <span className="font-mono text-[10px] uppercase text-[#fef08a] shrink-0">
+                  <span className="font-semibold">{sealedSuccessBanner}</span>
+                  <span className="font-mono text-[10px] uppercase text-[#fef08a] font-black shrink-0">
                     SEALED ✓
                   </span>
                 </div>
               )}
 
               {/* Sender & Company Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[#cbd5e1] mb-1">
-                    Your Name &amp; Title
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="block font-mono text-[10px] uppercase tracking-widest text-[#94a3b8] font-bold">
+                    Full Name & Title
                   </label>
                   <input
                     type="text"
                     value={senderName}
                     onChange={(e) => setSenderName(e.target.value)}
                     placeholder="e.g., Sarah Chen, VP of Design"
-                    className="w-full px-3 py-2 bg-[#060a12] border border-[#d4af37]/35 text-[#f8f5ee] text-xs sm:text-sm placeholder-[#64748b] focus:outline-none focus:border-[#2dd4bf]"
+                    className="w-full px-4 py-3 bg-[#060a12] border border-[#d4af37]/30 text-[#f8f5ee] text-sm placeholder-[#475569] focus:outline-none focus:border-[#2dd4bf] transition-colors"
                   />
                 </div>
-                <div>
-                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[#cbd5e1] mb-1">
+                <div className="space-y-1.5">
+                  <label className="block font-mono text-[10px] uppercase tracking-widest text-[#94a3b8] font-bold">
                     Company / Organization
                   </label>
                   <input
                     type="text"
                     value={organization}
                     onChange={(e) => setOrganization(e.target.value)}
-                    placeholder="e.g., Stripe / Anthropic / Series B AI"
-                    className="w-full px-3 py-2 bg-[#060a12] border border-[#d4af37]/35 text-[#f8f5ee] text-xs sm:text-sm placeholder-[#64748b] focus:outline-none focus:border-[#2dd4bf]"
+                    placeholder="e.g., Stripe / Anthropic"
+                    className="w-full px-4 py-3 bg-[#060a12] border border-[#d4af37]/30 text-[#f8f5ee] text-sm placeholder-[#475569] focus:outline-none focus:border-[#2dd4bf] transition-colors"
                   />
                 </div>
               </div>
 
-              {/* Role Track 2x2 Grid */}
-              <div>
-                <label className="block font-mono text-[10px] uppercase tracking-wider text-[#cbd5e1] mb-1.5">
-                  Select Role / Engagement Track
+              {/* Role Track - Simplified Grid */}
+              <div className="space-y-2">
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-[#94a3b8] font-bold">
+                  Engagement Track
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {OPPORTUNITY_TYPES.map((item) => {
                     const valueStr = `${item.label} (${item.sub})`;
                     const active = opportunityType === valueStr;
@@ -388,19 +358,16 @@ export const RecruiterTempleModal: React.FC<RecruiterTempleModalProps> = ({
                         key={item.id}
                         type="button"
                         onClick={() => setOpportunityType(valueStr)}
-                        className={`p-2.5 text-left border transition-all cursor-pointer ${
+                        className={`group p-3 text-left border transition-all cursor-pointer ${
                           active
-                            ? 'bg-[#17130a] border-[#d4af37] text-[#fef08a] shadow-[0_4px_18px_rgba(212,175,55,0.18)]'
+                            ? 'bg-[#17130a] border-[#d4af37] text-[#fef08a] ring-1 ring-[#d4af37]/30'
                             : 'bg-[#060a12] border-[#d4af37]/20 text-[#cbd5e1] hover:border-[#d4af37]/50'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-sans text-xs font-bold">{item.label}</span>
-                          <span className="font-mono text-[10px] text-[#d4af37]">
-                            {active ? '◆' : '◇'}
-                          </span>
+                        <div className="font-sans text-xs font-black uppercase tracking-tight group-hover:text-[#fef08a] transition-colors">
+                          {item.label}
                         </div>
-                        <div className="font-mono text-[10px] text-[#94a3b8] mt-0.5">
+                        <div className="font-mono text-[9px] text-[#94a3b8] mt-1 group-hover:text-[#cbd5e1]">
                           {item.sub}
                         </div>
                       </button>
@@ -410,38 +377,35 @@ export const RecruiterTempleModal: React.FC<RecruiterTempleModalProps> = ({
               </div>
 
               {/* Message Area */}
-              <div>
-                <label className="block font-mono text-[10px] uppercase tracking-wider text-[#cbd5e1] mb-1">
-                  Note &amp; Role Context for Ayush
+              <div className="space-y-1.5">
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-[#94a3b8] font-bold">
+                  Custom Context
                 </label>
                 <textarea
                   rows={3}
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#060a12] border border-[#d4af37]/35 text-[#f8f5ee] text-xs sm:text-sm leading-relaxed focus:outline-none focus:border-[#2dd4bf]"
+                  className="w-full px-4 py-3 bg-[#060a12] border border-[#d4af37]/30 text-[#f8f5ee] text-sm leading-relaxed focus:outline-none focus:border-[#2dd4bf] transition-colors"
                 />
               </div>
-            </div>
 
-            {/* Clean Primary & Secondary Action Bar */}
-            <div className="pt-3 border-t border-[#d4af37]/20 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-              <button
-                type="button"
-                data-testid="temple-send-email-btn"
-                onClick={() => handleSealAndEmail(true)}
-                className="flex-1 px-5 py-2.5 bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-xs font-extrabold uppercase tracking-[0.14em] cursor-pointer transition-colors text-center shadow-[0_10px_28px_rgba(212,175,55,0.3)]"
-              >
-                ✉️ Dispatch via Email &amp; Seal Scroll
-              </button>
-
-              <button
-                type="button"
-                data-testid="temple-seal-only-btn"
-                onClick={() => handleSealAndEmail(false)}
-                className="px-4 py-2.5 border border-[#2dd4bf]/60 bg-[#071f24] hover:bg-[#0d333b] text-[#ccfbf1] font-hud text-xs font-bold uppercase tracking-[0.14em] cursor-pointer transition-colors text-center"
-              >
-                📜 Seal in Temple Ledger
-              </button>
+              {/* Primary Actions */}
+              <div className="pt-4 flex flex-col sm:flex-row items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => handleSealAndEmail(true)}
+                  className="flex-1 w-full px-6 py-3.5 bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-xs font-black uppercase tracking-[0.2em] cursor-pointer transition-all shadow-xl hover:shadow-[#d4af37]/20 transform hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  ✉️ Dispatch Opportunity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSealAndEmail(false)}
+                  className="w-full sm:w-auto px-6 py-3.5 border-2 border-[#2dd4bf]/40 bg-[#071f24] hover:bg-[#0d333b] text-[#2dd4bf] font-hud text-xs font-black uppercase tracking-[0.2em] cursor-pointer transition-all"
+                >
+                  📜 Seal in Ledger
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -105,25 +105,24 @@ export default function App() {
 
   const handleInspectStop = useCallback(
     (stopId: string) => {
+      const stopObj = PORTFOLIO_STOPS.find((s) => s.id === stopId);
+      if (!stopObj) return;
       setHypoGuideOpen(false);
       setRecruiterTempleOpen(false);
-      setActiveStopId(stopId);
+      setActiveStopId(stopObj.id);
       setVisitedStopIds((prev) => {
-        if (prev.has(stopId)) return prev;
+        if (prev.has(stopObj.id)) return prev;
         const next = new Set(prev);
-        next.add(stopId);
-        const stopObj = PORTFOLIO_STOPS.find((s) => s.id === stopId);
-        if (stopObj) {
-          if (next.size >= PORTFOLIO_STOPS.length) {
-            showToast(
-              `⚔ 6/6 PROJECTS SEEN! BOSS CHALLENGE CIRCLE & [Z] ⚡ SKY-LIGHTNING UNLOCKED — Head to the Northern Citadel to challenge the Layoff Boss!`,
-              6500
-            );
-          } else {
-            showToast(
-              `Astra Power Awakened (${next.size}/6): ${stopObj.unlockedPower.name} (+${stopObj.unlockedPower.bonusDamage} ATK)`
-            );
-          }
+        next.add(stopObj.id);
+        if (next.size >= PORTFOLIO_STOPS.length) {
+          showToast(
+            `⚔ 6/6 PROJECTS SEEN! BOSS CHALLENGE CIRCLE & [Z] ⚡ SKY-LIGHTNING UNLOCKED — Head to the Northern Citadel to challenge the Layoff Boss!`,
+            6500
+          );
+        } else {
+          showToast(
+            `Astra Power Awakened (${next.size}/6): ${stopObj.unlockedPower.name} (+${stopObj.unlockedPower.bonusDamage} ATK)`
+          );
         }
         return next;
       });
@@ -298,7 +297,7 @@ export default function App() {
         const order: TimeOfDay[] = ['dawn', 'noon', 'twilight'];
         const nextMode = order[(order.indexOf(timeOfDay) + 1) % order.length];
         handleChangeTimeOfDay(nextMode);
-      } else if (e.code === 'KeyG') {
+      } else if (e.code === 'KeyK') {
         const nextPreset = getNextWeatherPreset(weatherPreset);
         handleChangeWeatherPreset(nextPreset);
       }

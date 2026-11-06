@@ -63,7 +63,7 @@
   );
 }
 
-.clip- slanted-bar {
+.clip-slanted-bar {
   clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
 }
 

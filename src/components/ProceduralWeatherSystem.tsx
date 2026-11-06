@@ -118,7 +118,7 @@ export const ProceduralWeatherSystem: React.FC<ProceduralWeatherSystemProps> = (
             setDrawerOpen((prev) => !prev);
           }}
           className="px-2 h-6 font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#f8f5ee] hover:text-[#fef08a] transition-colors cursor-pointer flex items-center gap-1.5"
-          title={`Procedural Weather: ${profile.title} — ${profile.subtitle} [Key W]`}
+          title={`Procedural Weather: ${profile.title} — ${profile.subtitle} [Key K]`}
         >
           {renderWeatherGlyph(profile.kind, profile.primaryParticleHex)}
           <span style={{ color: profile.primaryParticleHex }}>{profile.title}</span>
@@ -200,7 +200,7 @@ export const ProceduralWeatherSystem: React.FC<ProceduralWeatherSystemProps> = (
           <div className="space-y-1">
             <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-[#94a3b8]">
               <span>Atmospheric Particle &amp; Fog Mode</span>
-              <span className="text-[#d4af37]">[Key W]</span>
+              <span className="text-[#d4af37]">[Key K]</span>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {WEATHER_PRESET_OPTIONS.map((opt) => {

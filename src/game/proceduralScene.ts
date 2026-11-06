@@ -4839,12 +4839,26 @@ export function buildAncientWorldScene(
     flagstoneTex.dispose();
     terrainTex.dispose();
     scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry.dispose();
+      if (
+        obj instanceof THREE.Mesh ||
+        obj instanceof THREE.Line ||
+        obj instanceof THREE.Points ||
+        obj instanceof THREE.Sprite
+      ) {
+        if ('geometry' in obj && obj.geometry) {
+          obj.geometry.dispose();
+        }
+        const disposeMaterial = (m: THREE.Material) => {
+          const matWithMap = m as THREE.Material & { map?: THREE.Texture | null };
+          if (matWithMap.map) {
+            matWithMap.map.dispose();
+          }
+          m.dispose();
+        };
         if (Array.isArray(obj.material)) {
-          obj.material.forEach((m) => m.dispose());
-        } else {
-          obj.material.dispose();
+          obj.material.forEach(disposeMaterial);
+        } else if (obj.material) {
+          disposeMaterial(obj.material);
         }
       }
     });

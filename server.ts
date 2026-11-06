@@ -20,9 +20,8 @@ async function startServer() {
 
   app.post('/api/hypo-chat', async (req, res) => {
     const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
-    const history: { role: 'user' | 'hypo'; text: string }[] = Array.isArray(req.body?.history)
-      ? req.body.history
-      : [];
+    const history: { role?: 'user' | 'hypo'; sender?: 'user' | 'hypo'; text: string }[] =
+      Array.isArray(req.body?.history) ? req.body.history : [];
     const context: HypoContextState = {
       visitedStopIds: Array.isArray(req.body?.context?.visitedStopIds)
         ? req.body.context.visitedStopIds
@@ -55,7 +54,7 @@ async function startServer() {
 
       const recentTranscript = history
         .slice(-6)
-        .map((m) => `${m.role === 'user' ? 'Player' : 'Hypo'}: ${m.text}`)
+        .map((m) => `${(m.role || m.sender) === 'user' ? 'Player' : 'Hypo'}: ${m.text}`)
         .join('\n');
 
       const response = await ai.models.generateContent({
@@ -109,6 +108,21 @@ async function startServer() {
       if (rawText) {
         const parsed = JSON.parse(rawText);
         if (parsed && typeof parsed.reply === 'string') {
+          const stopAliasMap: Record<string, string> = {
+            'stop-1': 'mandapa-origin',
+            'stop-2': 'jantar-observatory',
+            'stop-3': 'oasis-pavilion',
+            'stop-4': 'ashoka-stambha',
+            'stop-5': 'gopuram-sanctum',
+            'stop-6': 'chand-stepwell',
+          };
+          if (
+            parsed.action &&
+            typeof parsed.action.targetId === 'string' &&
+            stopAliasMap[parsed.action.targetId]
+          ) {
+            parsed.action.targetId = stopAliasMap[parsed.action.targetId];
+          }
           return res.json(parsed);
         }
       }

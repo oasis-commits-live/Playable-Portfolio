@@ -85,6 +85,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const [hoveredItem, setHoveredItem] = useState<number>(0);
   const [activeModal, setActiveModal] = useState<ModalSection>(null);
 
+  const MENU_ITEM_COUNT = 4;
+
   // Keyboard navigation for the vertical title menu (Up/Down/W/S, Esc to close modal)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -97,9 +99,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         return;
       }
       if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-        setHoveredItem((prev) => (prev + 1) % 4);
+        setHoveredItem((prev) => (prev + 1) % MENU_ITEM_COUNT);
       } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-        setHoveredItem((prev) => (prev - 1 + 4) % 4);
+        setHoveredItem((prev) => (prev - 1 + MENU_ITEM_COUNT) % MENU_ITEM_COUNT);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -409,7 +411,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     : '0 4px 14px rgba(0,0,0,0.9)',
               }}
             >
-              Start Game
+              Start Portfolio
             </span>
             <MenuPointerRight active={hoveredItem === 0} />
           </button>
@@ -709,7 +711,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 }}
                 className="font-mythic text-xs tracking-[0.24em] uppercase text-[#fde68a] hover:text-white cursor-pointer py-1 border-b border-[#fde68a]/60 hover:border-white transition-colors"
               >
-                Start Game [Enter]
+                Start Portfolio [Enter]
               </button>
             </div>
           </div>

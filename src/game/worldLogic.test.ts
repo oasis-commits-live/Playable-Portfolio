@@ -438,6 +438,7 @@ test('getWorldColliders enforces solid physics on all 56 tree trunks, Saraswati 
 
 test('resolveLocalHypoChat answers conversational questions about portfolio projects, career background, and Recruiter Temple with in-world actions', async () => {
   const { resolveLocalHypoChat } = await import('./hypoBrain');
+  const validStopIds = new Set(PORTFOLIO_STOPS.map((s) => s.id));
 
   const veraResp = resolveLocalHypoChat('Tell me about HyperLM Vera CFO AI project', {
     visitedCount: 1,
@@ -447,6 +448,29 @@ test('resolveLocalHypoChat answers conversational questions about portfolio proj
   assert.ok(veraResp.reply.includes('Vera'), 'Should describe HyperLM Vera project');
   assert.equal(veraResp.action?.type, 'teleport_project');
   assert.equal(veraResp.action?.targetId, 'mandapa-origin');
+  assert.ok(validStopIds.has(veraResp.action?.targetId || ''));
+
+  for (const query of [
+    'Which project should I see first?',
+    'Show me Bridge handoff tool',
+    'Tell me about Oasis gaming arcade',
+    'Payments Co-Pilot',
+    'Invoice Processing Co-Pilot',
+    'Hyperbots Vendor Portal',
+  ]) {
+    const resp = resolveLocalHypoChat(query, {
+      visitedStopIds: ['mandapa-origin'],
+      visitedCount: 1,
+      relicsCount: 0,
+      bossDefeated: false,
+    });
+    if (resp.action?.type === 'teleport_project' || resp.action?.type === 'track_project') {
+      assert.ok(
+        validStopIds.has(resp.action.targetId || ''),
+        `Action targetId "${resp.action.targetId}" for query "${query}" must be a valid PORTFOLIO_STOPS id`
+      );
+    }
+  }
 
   const hireResp = resolveLocalHypoChat('How can I hire or email Ayush?', {
     visitedCount: 3,

@@ -83,7 +83,7 @@ export const HypoGuideModal: React.FC<HypoGuideModalProps> = ({
       text: `Namaste, Builder! I'm Hypo, your porcelain-and-gold AI companion. Ask me anything about Ayush Dubey's 6 shipped AI & FinTech case studies, career impact, or ask me to guide you anywhere in the Portfolio Verse!`,
       action: {
         type: 'teleport_project',
-        targetId: 'stop-1',
+        targetId: 'mandapa-origin',
         label: 'Visit 01 · CFO AI Workspace (HyperLM Vera)',
       },
       followUpPrompts: [
@@ -158,13 +158,14 @@ export const HypoGuideModal: React.FC<HypoGuideModalProps> = ({
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 850);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       const response = await fetch('/api/hypo-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: trimmed,
           history: nextHistory.slice(-6).map((m) => ({
+            role: m.sender,
             sender: m.sender,
             text: m.text,
           })),
