@@ -45,12 +45,7 @@ export const BASE_ATTACK_RANGE = 4.8;
 export const MAX_GRAPPLE_DISTANCE = 56;
 export const MAX_STEP_UP_HEIGHT = 0.78;
 
-// Survival Mode Constants
-export const SURVIVAL_ARENA_CENTER: Vec2XZ = { x: 0, z: -48 }; // Northern Citadel
-export const SURVIVAL_ARENA_RADIUS = 25;
-export const SURVIVAL_WAVE_SIZE = 7;
-export const SURVIVAL_BASE_DEMON_HP = 120;
-export const SURVIVAL_BASE_DEMON_DAMAGE = 15;
+
 
 /**
  * Finds the next unvisited PortfolioStop for guidance.

@@ -51,7 +51,7 @@ import {
   WorldAffordanceMarker,
   EngagedDemonTelemetry,
 } from './HudOverlay';
-import { findNextGuidanceSanctum, SURVIVAL_ARENA_CENTER, SURVIVAL_ARENA_RADIUS, SURVIVAL_WAVE_SIZE, SURVIVAL_BASE_DEMON_HP, SURVIVAL_BASE_DEMON_DAMAGE } from '../game/worldLogic';
+import { findNextGuidanceSanctum } from '../game/worldLogic';
 
 export interface WorldControllerRef {
   teleportToStop: (stopId: string) => void;
@@ -77,7 +77,6 @@ interface WorldCanvasProps {
   activeStopId: string | null;
   visitedStopIds: Set<string>;
   collectedRelicIds: Set<string>;
-  gameMode: 'portfolio' | 'survival';
   onTelemetryUpdate: (telemetry: HudTelemetry) => void;
   onInspectStop: (stopId: string) => void;
   onCloseStop: () => void;
@@ -117,7 +116,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
   activeStopId,
   visitedStopIds,
   collectedRelicIds,
-  gameMode,
   onTelemetryUpdate,
   onInspectStop,
   onCloseStop,
@@ -138,7 +136,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     activeStopId,
     visitedStopIds,
     collectedRelicIds,
-    gameMode,
     onTelemetryUpdate,
     onInspectStop,
     onCloseStop,
@@ -158,7 +155,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       activeStopId,
       visitedStopIds,
       collectedRelicIds,
-      gameMode,
       onTelemetryUpdate,
       onInspectStop,
       onCloseStop,
@@ -196,7 +192,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     onGamepadStatusChange,
     onOpenRecruiterTemple,
     onOpenHypoGuide,
-    gameMode,
   ]);
 
   useEffect(() => {
@@ -301,10 +296,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       combatCalloutTimer: 0,
       manualBossSummon: false,
       lightningCooldown: 0,
-      survivalWave: 0,
-      survivalScore: 0,
-      survivalWaveInProgress: false,
-      survivalWaveTimer: 0,
     };
 
     const camState = {
@@ -598,9 +589,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             if (demon.hp <= 0) {
               demon.alive = false;
               demon.dyingTimer = 1.25;
-              if (stateRef.current.gameMode === 'survival') {
-                playerState.survivalScore += 150;
-              }
+              demon.dyingTimer = 1.25;
               demon.deathVortexMesh.visible = true;
               demon.deathVortexMesh.scale.setScalar(0.35);
               demon.territoryRingMesh.visible = false;
@@ -730,11 +719,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     // Super Power: Indra Vajra Sky-Lightning Bolt (Unlocked after all 6 Projects have been seen!) [Key Z]
     const performLightningBolt = () => {
       const unlockedCount = stateRef.current.visitedStopIds.size;
-      if (stateRef.current.gameMode === 'survival') {
-        sound.playPerilousWarning();
-        showCombatCallout('⚡ INDRA VAJRA SKY-LIGHTNING UNAVAILABLE IN SURVIVAL MODE', 2.2);
-        return;
-      }
       if (!canCastLightningBolt(unlockedCount)) {
         sound.playPerilousWarning();
         showCombatCallout(
@@ -1516,7 +1500,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let elapsedTotal = 0;
     let lastHudEmitTime = 0;
     let lastGameStateInTick = gameState;
-    let lastGameModeInTick = gameMode;
 
     function afterDraw(cb: () => void) {
       if (isDisposed) return;
@@ -1649,7 +1632,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       const activeStopIdNow = stateRef.current.activeStopId;
       const visitedStopsNow = stateRef.current.visitedStopIds;
       const collectedRelicsNow = stateRef.current.collectedRelicIds;
-      const currentGameMode = stateRef.current.gameMode;
+      const currentActiveStop = stateRef.current.activeStopId;
       const playerPos2D = { x: playerState.x, z: playerState.z };
 
       if (currentMode !== 'paused') {
@@ -1658,39 +1641,18 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
       // Detect transition to playing mode to position player correctly
       if (currentMode === 'playing' && lastGameStateInTick !== 'playing') {
-        if (currentGameMode === 'survival') {
-          playerState.x = SURVIVAL_ARENA_CENTER.x;
-          playerState.z = SURVIVAL_ARENA_CENTER.z + 10; // Start at edge
-          playerState.y = walkableSurfaceHeightAt(playerState.x, playerState.z, 0);
-          playerState.vx = 0;
-          playerState.vz = 0;
-          playerState.vy = 0;
-          playerState.grounded = true;
-          playerState.yaw = Math.PI;
-          playerState.survivalWave = 0;
-          playerState.survivalScore = 0;
-          playerState.survivalWaveInProgress = false;
-          playerState.hp = playerState.maxHp;
-          // Deactivate all demons initially
-          for (const demon of world.demons) {
-            demon.alive = false;
-            demon.group.visible = false;
-          }
-        } else {
-          // Reset if starting portfolio from title
-          playerState.x = 0;
-          playerState.z = 8.2;
-          playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
-          playerState.vx = 0;
-          playerState.vz = 0;
-          playerState.vy = 0;
-          playerState.grounded = true;
-          playerState.yaw = Math.PI;
-          playerState.hp = playerState.maxHp;
-        }
+        // Reset if starting portfolio from title
+        playerState.x = 0;
+        playerState.z = 8.2;
+        playerState.y = walkableSurfaceHeightAt(0, 8.2, 0);
+        playerState.vx = 0;
+        playerState.vz = 0;
+        playerState.vy = 0;
+        playerState.grounded = true;
+        playerState.yaw = Math.PI;
+        playerState.hp = playerState.maxHp;
       }
       lastGameStateInTick = currentMode;
-      lastGameModeInTick = currentGameMode;
 
       const gpInput = pollGamepad(frameDt);
 
@@ -2085,61 +2047,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         let engagedDemonEntity: (typeof world.demons)[number] | null = null;
         let aliveDemonsCount = 0;
 
-        // Survival Mode Wave Management
-        if (currentGameMode === 'survival' && currentMode === 'playing' && !activeStopIdNow) {
-          const currentlyAlive = world.demons.filter(d => d.alive).length;
-          if (currentlyAlive === 0) {
-            if (!playerState.survivalWaveInProgress) {
-              playerState.survivalWaveInProgress = true;
-              playerState.survivalWaveTimer = 3.5; // Delay before next wave
-              if (playerState.survivalWave > 0) {
-                playerState.survivalScore += playerState.survivalWave * 1000;
-                showCombatCallout(`WAVE ${playerState.survivalWave} COMPLETE!`, 2.5);
-                sound.playRelicChime(true);
-              }
-            } else {
-              playerState.survivalWaveTimer -= dt;
-              if (playerState.survivalWaveTimer <= 0) {
-                playerState.survivalWave += 1;
-                playerState.survivalWaveInProgress = false;
-                
-                // Spawn new wave of demons
-                const waveCount = SURVIVAL_WAVE_SIZE;
-                const waveDifficulty = 1 + (playerState.survivalWave - 1) * 0.2;
-                
-                // Repurpose demons array if needed, but for now let's just reset/reactivate them
-                // and move them to the arena.
-                for (let i = 0; i < world.demons.length; i++) {
-                  const demon = world.demons[i];
-                  if (i < waveCount) {
-                    const angle = (i / waveCount) * Math.PI * 2;
-                    const spawnDist = 12 + Math.random() * 5;
-                    demon.homeX = SURVIVAL_ARENA_CENTER.x + Math.cos(angle) * spawnDist;
-                    demon.homeZ = SURVIVAL_ARENA_CENTER.z + Math.sin(angle) * spawnDist;
-                    demon.x = demon.homeX;
-                    demon.z = demon.homeZ;
-                    demon.y = walkableSurfaceHeightAt(demon.x, demon.z, 0);
-                    demon.alive = true;
-                    demon.hp = Math.round(SURVIVAL_BASE_DEMON_HP * waveDifficulty);
-                    demon.maxHp = demon.hp;
-                    demon.attackDamage = Math.round(SURVIVAL_BASE_DEMON_DAMAGE * waveDifficulty);
-                    demon.state = 'patrol';
-                    demon.group.visible = true;
-                    demon.bodyGroup.scale.setScalar(demon.scale * (1 + (playerState.survivalWave-1)*0.05));
-                    demon.dyingTimer = 0;
-                    demon.posture = 0;
-                    world.particlePool.spawnBurst(demon.x, demon.y + 1, demon.z, 12, true);
-                  } else {
-                    demon.alive = false;
-                    demon.group.visible = false;
-                  }
-                }
-                showCombatCallout(`SURVIVAL WAVE ${playerState.survivalWave} BEGINS!`, 3.0);
-                sound.playBossAwaken();
-              }
-            }
-          }
-        }
+        // Demons logic remains for standard portfolio encounters
 
         for (const demon of world.demons) {
           if (!demon.alive) {
@@ -2941,8 +2849,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             combatPopups: projectedPopups,
             affordanceMarkers: trimmedMarkers,
             waypointScreen: null,
-            survivalWave: playerState.survivalWave,
-            survivalScore: playerState.survivalScore,
             nextGuidanceSanctum: nextGuidance ? {
               title: nextGuidance.stop.title,
               distance: Math.round(nextGuidance.distance)

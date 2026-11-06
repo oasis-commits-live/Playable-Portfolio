@@ -635,6 +635,7 @@ function buildForgedDivineWeaponModel(
       createForgedBladeGeometry(1.68, 0.078, 0.075, 0.014),
       bladeMat
     );
+    katanaBlade.name = 'DivineBlade';
     katanaBlade.position.set(0, 0.24, 0);
     wRoot.add(katanaBlade);
     return { root: wRoot, primaryBlade: katanaBlade };
@@ -666,6 +667,7 @@ function buildForgedDivineWeaponModel(
       createForgedBladeGeometry(1.98, 0.135, 0.04, 0.022),
       greatswordMat
     );
+    greatBlade.name = 'DivineBlade';
     greatBlade.position.y = 0.24;
     wRoot.add(greatBlade);
     return { root: wRoot, primaryBlade: greatBlade };
@@ -692,6 +694,7 @@ function buildForgedDivineWeaponModel(
       createForgedBladeGeometry(1.48, 0.092, 0.12, 0.014),
       emeraldMat
     );
+    saberBlade.name = 'DivineBlade';
     saberBlade.position.set(0, 0.2, 0);
     wRoot.add(saberBlade);
     return { root: wRoot, primaryBlade: saberBlade };
@@ -722,6 +725,7 @@ function buildForgedDivineWeaponModel(
     createForgedBladeGeometry(1.22, 0.11, 0.02, 0.018),
     halberdMat
   );
+  spearTip.name = 'DivineBlade';
   spearTip.position.y = 1.35;
   wRoot.add(spearTip);
   return { root: wRoot, primaryBlade: spearTip };
@@ -1282,16 +1286,9 @@ function createPlayerCharacter(): PlayerRig {
       if (walkClip) rig.actions.walk = mixer.clipAction(walkClip);
       if (runClip) rig.actions.run = mixer.clipAction(runClip);
 
-      if (rig.rightHandBone) {
-        rig.rightHandBone.add(weaponArmPivot);
-        weaponArmPivot.position.set(0, 0, 0);
-        weaponArmPivot.rotation.set(0, 0, 0);
-      }
-      if (rig.leftHandBone) {
-        rig.leftHandBone.add(offhandArmPivot);
-        offhandArmPivot.position.set(0, 0, 0);
-        offhandArmPivot.rotation.set(0, 0, 0);
-      }
+      // We DO NOT parent pivots to bones here because updateWorldAnimations 
+      // manually snaps their position to the bone world pos relative to bodyGroup every frame.
+      // Parenting them to bones while also setting their position manually causes jitter and offsets.
 
       rig.actions.idle?.play();
 
@@ -4407,11 +4404,23 @@ export function buildAncientWorldScene(
     const weaponConf = FORGE_WEAPONS.find((w) => w.id === equippedWeaponId);
     const col = new THREE.Color(weaponConf ? weaponConf.colorHex : colorHex);
 
-    if (playerRig.swordBlade.material instanceof THREE.MeshStandardMaterial) {
-      playerRig.swordBlade.material.color.copy(col);
-      playerRig.swordBlade.material.emissive.copy(col);
-      playerRig.swordBlade.material.emissiveIntensity = 1.45 + unlockedCount * 0.25;
-    }
+    // Update materials for all primary blades across all weapons
+    const updateBladeMat = (obj: THREE.Object3D) => {
+      obj.traverse((child) => {
+        if (child.name === 'DivineBlade' && (child as THREE.Mesh).isMesh) {
+          const m = child as THREE.Mesh;
+          if (m.material instanceof THREE.MeshStandardMaterial) {
+            m.material.color.copy(col);
+            m.material.emissive.copy(col);
+            m.material.emissiveIntensity = 1.45 + unlockedCount * 0.25;
+          }
+        }
+      });
+    };
+
+    Object.values(playerRig.weaponMeshes).forEach(updateBladeMat);
+    updateBladeMat(playerRig.offhandArmPivot);
+
     if (playerRig.slashArcMesh.material instanceof THREE.MeshBasicMaterial) {
       playerRig.slashArcMesh.material.color.copy(col);
     }

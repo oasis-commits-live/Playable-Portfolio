@@ -139,8 +139,6 @@ export interface HudTelemetry {
     title: string;
     stopId: string;
   } | null;
-  survivalWave?: number;
-  survivalScore?: number;
   nextGuidanceSanctum?: {
     title: string;
     distance: number;
@@ -149,7 +147,6 @@ export interface HudTelemetry {
 
 interface HudOverlayProps {
   gameState: 'title' | 'playing' | 'paused' | 'gameover' | 'player_died';
-  gameMode?: 'portfolio' | 'survival';
   telemetry: HudTelemetry;
   visitedStopIds: Set<string>;
   collectedRelicIds: Set<string>;
@@ -177,7 +174,6 @@ interface HudOverlayProps {
   onResetSpawn: () => void;
   onRestartFromBeginning: () => void;
   onReturnToTitle: () => void;
-  onSaveScore?: (name: string, score: number, wave: number) => void;
   onResumeFromMastery: () => void;
   onVirtualMove: (forward: number, right: number) => void;
   onVirtualJump: () => void;
@@ -187,7 +183,6 @@ interface HudOverlayProps {
 
 export const HudOverlay: React.FC<HudOverlayProps> = ({
   gameState,
-  gameMode,
   telemetry,
   visitedStopIds,
   collectedRelicIds,
@@ -214,7 +209,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onResetSpawn,
   onRestartFromBeginning,
   onReturnToTitle,
-  onSaveScore,
   onResumeFromMastery,
   onVirtualMove,
   onVirtualJump,
@@ -1029,510 +1023,92 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           onTriggerParry={onTriggerParry}
           onTriggerDash={onTriggerDash}
           onTriggerGrapple={onTriggerGrapple}
-          onInteractContext={
-            telemetry.nearStop
-              ? () => onInspectStop(telemetry.nearStop!.id)
-              : telemetry.nearWeaponForge
-              ? () => onEquipWeapon?.(telemetry.nearWeaponForge!.id)
-              : undefined
-          }
-          contextActionLabel={
-            telemetry.nearStop
-              ? 'INSPECT'
-              : telemetry.nearWeaponForge
-              ? 'EQUIP'
-              : null
-          }
-          comboStage={telemetry.comboStage}
-          grappleAvailable={Boolean(telemetry.grappleTargetTitle)}
-          isGliding={Boolean(telemetry.isGliding)}
+          onTogglePause={onTogglePause}
+          onCycleWeapon={() => {
+            const currentIdx = FORGE_WEAPONS.findIndex((w) => w.id === equippedWeaponId);
+            const nextIdx = (currentIdx + 1) % FORGE_WEAPONS.length;
+            onEquipWeapon?.(FORGE_WEAPONS[nextIdx].id);
+          }}
+          onCycleTime={cycleTimeOfDay}
           lightningUnlocked={visitedStopIds.size >= 6}
-          unlockedProjectsCount={visitedStopIds.size}
+          lightningCooldown={telemetry.lightningCooldown}
         />
       )}
 
-      {/* Pause Modal Card */}
-      {gameState === 'paused' && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="pause-modal-title"
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#04060b]/88 backdrop-blur-md pointer-events-auto"
-        >
-          <div className="w-full max-w-md bg-[#070b14] border border-[#d4af37]/45 p-6 text-[#f4efe6] space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#d4af37]/20 pb-3">
-              <div>
-                <div className="text-[10px] font-hud font-bold text-[#d4af37] uppercase tracking-[0.22em]">
-                  PORTFOLIO VERSE ATLAS · PAUSED
-                </div>
-                <h2 id="pause-modal-title" className="font-display text-xl font-bold text-[#f8f5ee]">
-                  Ayush Dubey — Portfolio Verse
+      {/* 7. GAME OVER / PLAYER DIED FULL-SCREEN MODAL */}
+      {(gameState === 'gameover' || gameState === 'player_died') && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/95 backdrop-blur-md pointer-events-auto">
+          <div className="w-full max-w-xl text-center space-y-10 animate-fade-in-slow">
+             <div className="space-y-4">
+                <h2 className={`font-mythic text-4xl lg:text-6xl tracking-[0.25em] uppercase ${gameState === 'gameover' ? 'text-[#fef08a] neon-glow-yellow' : 'text-[#f43f5e] neon-glow-red'}`}>
+                  {gameState === 'gameover' ? 'MAHA-ASURA VANQUISHED' : 'PRANA EXTINGUISHED'}
                 </h2>
-              </div>
-              <div className="font-hud text-xs font-bold text-[#2dd4bf] tracking-wider">
-                {stats.visitedStopsCount}/6 SANCTUMS · {6 - aliveDemons}/6 ASURAS
-              </div>
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {PORTFOLIO_STOPS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => {
-                    onTogglePause();
-                    onTeleportToStop(s.id);
-                  }}
-                  className="w-full flex items-center justify-between px-3.5 py-2 clip-blade-right bg-[#0c1322] hover:bg-[#152138] border-l-2 border-[#d4af37]/50 text-left cursor-pointer transition-colors"
-                >
-                  <span className="font-sans font-medium text-[#f8f5ee]">
-                    {s.indexNumber}. {s.title}
-                  </span>
-                  <span
-                    className={`font-hud text-xs font-bold uppercase tracking-wider ${
-                      visitedStopIds.has(s.id) ? 'text-[#2dd4bf]' : 'text-[#d4af37]'
-                    }`}
-                  >
-                    {visitedStopIds.has(s.id) ? 'Awakened' : 'Fast Travel'}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-[#d4af37]/20 font-hud text-xs uppercase tracking-wider">
-              <button
-                type="button"
-                onClick={onReturnToTitle}
-                className="px-3.5 py-1.5 border border-[#d4af37]/35 bg-[#0c1322] hover:bg-[#172338] text-[#cbd5e1] cursor-pointer"
-              >
-                Title Screen
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onResetSpawn();
-                  onTogglePause();
-                }}
-                className="px-3.5 py-1.5 border border-[#d4af37]/35 bg-[#0c1322] hover:bg-[#172338] text-[#f8f5ee] cursor-pointer"
-              >
-                Reset Spawn
-              </button>
-              <button
-                type="button"
-                onClick={onTogglePause}
-                className="px-5 py-1.5 clip-blade-right bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-bold cursor-pointer"
-              >
-                Resume
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TRUE PLAYER DEATH / GAME OVER MODAL — Forces Full Restart from the Beginning */}
-      {gameState === 'player_died' && (
-        <div
-          data-testid="player-died-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="player-died-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#090205]/95 backdrop-blur-xl pointer-events-auto"
-        >
-          <div className="w-full max-w-lg bg-[#0d0509] border-2 border-[#e11d48] p-6 sm:p-8 text-[#f8f5ee] space-y-5 shadow-[0_0_60px_rgba(225,29,72,0.45)] text-center">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#2e0714] border border-[#f43f5e]/60 font-hud text-[11px] font-bold tracking-[0.26em] uppercase text-[#fda4af]">
-              <span>死 · PRANA EXTINGUISHED IN COMBAT</span>
-            </div>
-
-            <h2
-              id="player-died-title"
-              className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-[#ffe4e6]"
-            >
-              YOU HAVE FALLEN
-            </h2>
-
-            <p className="text-xs sm:text-sm text-[#cbd5e1] leading-relaxed max-w-md mx-auto">
-              Your Prana vitality dropped to zero against the Corporate Asuras of Portfolio Verse.
-              Hint: Inspect all <strong className="text-[#fef08a]">6 Project Sanctums</strong> to
-              unlock the <strong className="text-[#38bdf8]">⚡ Indra Vajra Sky-Lightning Bolt [Key Z]</strong>{' '}
-              and use <strong className="text-[#2dd4bf]">[RMB / V] Sekiro Deflect</strong> to shatter enemy posture!
-            </p>
-
-            <div className="p-3 bg-[#190810] border border-[#f43f5e]/30 text-left font-mono text-[11px] text-[#fda4af] space-y-1">
-              <div>• Projects Awakened before fall: {visitedStopIds.size} / 6</div>
-              <div>• Career Jewels Collected before fall: {collectedRelicIds.size} / 5</div>
-              <div>• Corporate Asuras Vanquished: {6 - aliveDemons} / 6</div>
-            </div>
-
-            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3 font-hud text-xs uppercase tracking-[0.18em]">
-              <button
-                type="button"
-                data-testid="restart-from-beginning-btn"
-                onClick={onRestartFromBeginning}
-                className="w-full sm:w-auto px-6 py-3 clip-blade-right bg-gradient-to-r from-[#e11d48] via-[#f43f5e] to-[#be123c] hover:brightness-110 text-white font-extrabold cursor-pointer shadow-[0_10px_28px_rgba(225,29,72,0.5)]"
-              >
-                ↻ RESTART FROM THE BEGINNING
-              </button>
-              <button
-                type="button"
-                onClick={onReturnToTitle}
-                className="w-full sm:w-auto px-4 py-3 border border-[#f43f5e]/40 bg-[#14070d] hover:bg-[#240b16] text-[#fda4af] font-bold cursor-pointer"
-              >
-                Title Screen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POST-COMPLETION SUMMARY SCROLL MODAL (Shows Seen & Unlocked vs. Still Left Unseen to Explore) */}
-      {(gameState === 'gameover' || summaryScrollOpen) && (
-        <div
-          data-testid="summary-scroll-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="mastery-modal-title"
-          className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-5 bg-[#04060b]/92 backdrop-blur-xl pointer-events-auto"
-        >
-          <div className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-[#070b14] border-2 border-[#d4af37] text-[#f4efe6] shadow-[0_24px_70px_rgba(0,0,0,0.95)] overflow-hidden">
-            {/* Scroll Header */}
-            <div className="px-5 py-4 bg-gradient-to-r from-[#130d04] via-[#0c1322] to-[#130d04] border-b border-[#d4af37]/40 flex items-start justify-between gap-4 shrink-0">
-              <div>
-                <div className="text-[10px] sm:text-xs font-hud font-bold text-[#2dd4bf] uppercase tracking-[0.24em]">
-                  {telemetry.bossDefeated
-                    ? '📜 ROYAL SUMMARY SCROLL · SEPTEMBER LAYOFF VANQUISHED!'
-                    : '📜 ROYAL SUMMARY SCROLL · PORTFOLIO VERSE CHRONICLE'}
-                </div>
-                <h2
-                  id="mastery-modal-title"
-                  className="font-display text-xl sm:text-2xl font-extrabold text-[#fef08a] mt-0.5"
-                >
-                  What You Saw &amp; Unlocked — And What Still Awaits in the Verse
-                </h2>
-                <p className="text-xs text-[#cbd5e1] mt-1">
-                  Review every Project Sanctum, Career Jewel, Divine Weapon, and Corporate Asura you
-                  have conquered—or teleport directly to anything still left unseen.
+                <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                <p className="font-hud text-xs lg:text-sm text-white/50 tracking-[0.2em] uppercase">
+                   {gameState === 'gameover' 
+                     ? 'You have overcome the Colossal Layoff and reclaimed the valley.' 
+                     : 'The Workforce Reduction was too great. Return to the Sankalpa to begin anew.'}
                 </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSummaryScrollOpen(false);
-                  if (gameState === 'gameover') {
-                    onResumeFromMastery();
-                  }
-                }}
-                className="px-2.5 py-1 border border-[#d4af37]/45 bg-[#0c1322] hover:bg-[#172540] font-mono text-xs text-[#fef08a] cursor-pointer shrink-0"
-              >
-                [ESC · CLOSE]
-              </button>
-            </div>
+             </div>
 
-            {/* Scrollable Body: Seen & Unlocked vs. Still Left Unseen */}
-            <div className="p-5 overflow-y-auto space-y-5 text-xs">
-              {/* Top Completion Telemetry Strip */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#2dd4bf]">
-                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Project Sanctums</div>
-                  <div className="font-hud text-base font-extrabold text-[#2dd4bf]">
-                    {visitedStopIds.size} / {PORTFOLIO_STOPS.length} Seen
-                  </div>
+             <div className="grid grid-cols-2 gap-4 py-8 border-y border-white/5">
+                <div className="space-y-1">
+                   <div className="text-[10px] font-mono text-white/30 uppercase">Projects Seen</div>
+                   <div className="font-mythic text-2xl text-white">{visitedStopIds.size}/6</div>
                 </div>
-                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#c084fc]">
-                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Career Jewels</div>
-                  <div className="font-hud text-base font-extrabold text-[#e879f9]">
-                    {collectedRelicIds.size} / {LOTUS_RELICS.length} Collected
-                  </div>
+                <div className="space-y-1">
+                   <div className="text-[10px] font-mono text-white/30 uppercase">Jewels Collected</div>
+                   <div className="font-mythic text-2xl text-white">{collectedRelicIds.size}/5</div>
                 </div>
-                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#38bdf8]">
-                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Sky-Lightning Power</div>
-                  <div className="font-hud text-base font-extrabold text-[#38bdf8]">
-                    {visitedStopIds.size >= 6 ? '⚡ UNLOCKED [Z]' : `LOCKED (${visitedStopIds.size}/6)`}
-                  </div>
-                </div>
-                <div className="p-2.5 bg-[#0b1322] border-l-2 border-[#f43f5e]">
-                  <div className="font-mono text-[9px] uppercase text-[#94a3b8]">Corporate Asuras</div>
-                  <div className="font-hud text-base font-extrabold text-[#fda4af]">
-                    {6 - aliveDemons}/6 + {telemetry.bossDefeated ? 'Boss Slain' : 'Boss Alive'}
-                  </div>
-                </div>
-              </div>
+             </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* COLUMN 1: WHAT YOU SAW, UNLOCKED & VANQUISHED */}
-                <div className="p-3.5 bg-[#0a101d] border border-[#2dd4bf]/35 space-y-3">
-                  <div className="flex items-center justify-between border-b border-[#2dd4bf]/25 pb-1.5">
-                    <span className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#2dd4bf]">
-                      ✓ SEEN &amp; UNLOCKED ({visitedStopIds.size + collectedRelicIds.size} DISCOVERIES)
-                    </span>
-                  </div>
-
-                  {/* Seen Projects & Unlocked Astra Powers */}
-                  <div className="space-y-1.5">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#d4af37]">
-                      Awakened Project Sanctums &amp; Powers ({visitedStopIds.size}/6)
-                    </div>
-                    {visitedStopIds.size === 0 ? (
-                      <div className="text-[11px] text-[#94a3b8] italic">
-                        No Project Sanctums inspected yet.
-                      </div>
-                    ) : (
-                      PORTFOLIO_STOPS.filter((s) => visitedStopIds.has(s.id)).map((s) => (
-                        <div
-                          key={s.id}
-                          className="flex items-center justify-between gap-2 p-2 bg-[#07161b] border-l-2 border-[#2dd4bf]"
-                        >
-                          <div>
-                            <div className="font-semibold text-[#f8f5ee]">
-                              {s.indexNumber}. {s.title}
-                            </div>
-                            <div className="font-mono text-[9px] text-[#2dd4bf]">
-                              Unlocked: {s.unlockedPower.name} (+{s.unlockedPower.bonusDamage} ATK)
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSummaryScrollOpen(false);
-                              onResumeFromMastery();
-                              onTeleportToStop(s.id);
-                            }}
-                            className="px-2 py-1 bg-[#0d9488]/30 hover:bg-[#0d9488] text-[#ccfbf1] hover:text-[#05070b] font-hud text-[9px] font-bold uppercase tracking-wider cursor-pointer"
-                          >
-                            Revisit →
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Collected Career Experience Jewels */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#e879f9]">
-                      Collected Career Jewels ({collectedRelicIds.size}/5)
-                    </div>
-                    {collectedRelicIds.size === 0 ? (
-                      <div className="text-[11px] text-[#94a3b8] italic">
-                        No Career Experience Jewels collected yet.
-                      </div>
-                    ) : (
-                      LOTUS_RELICS.filter((r) => collectedRelicIds.has(r.id)).map((r) => (
-                        <div
-                          key={r.id}
-                          className="p-2 bg-[#160b24] border-l-2 border-[#c084fc] space-y-0.5"
-                        >
-                          <div className="font-semibold text-[#f8f5ee]">
-                            ❖ {r.company} ({r.era})
-                          </div>
-                          <div className="text-[10px] text-[#e9d5ff]">{r.meaning}</div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Vanquished Corporate Asuras */}
-                  <div className="space-y-1 pt-1">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#fda4af]">
-                      Corporate Asuras Vanquished ({(telemetry.vanquishedDemonIds?.length ?? 0) + (telemetry.bossDefeated ? 1 : 0)}/7)
-                    </div>
-                    {telemetry.bossDefeated && (
-                      <div className="p-1.5 bg-[#290915] border-l-2 border-[#f43f5e] text-[10px] font-bold text-[#fecdd3]">
-                        ★ THE SEPTEMBER LAYOFF — "YOUR ROLE HAS BEEN IMPACTED" (SLAIN)
-                      </div>
-                    )}
-                    {INITIAL_DEMON_SPAWNS.filter((d) =>
-                      telemetry.vanquishedDemonIds?.includes(d.id)
-                    ).map((d) => (
-                      <div
-                        key={d.id}
-                        className="p-1.5 bg-[#1b0912] border-l-2 border-[#f43f5e]/70 text-[10px] text-[#fda4af]"
-                      >
-                        ✓ {d.name} ({d.title})
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* COLUMN 2: WHAT YOU COULD NOT SEE YET & IS STILL LEFT UNSEEN TO EXPLORE */}
-                <div className="p-3.5 bg-[#0f0c06] border border-[#d4af37]/50 space-y-3">
-                  <div className="flex items-center justify-between border-b border-[#d4af37]/30 pb-1.5">
-                    <span className="font-hud text-xs font-bold uppercase tracking-[0.18em] text-[#fef08a]">
-                      ✦ STILL LEFT UNSEEN IN THE WORLD ({6 - visitedStopIds.size + (5 - collectedRelicIds.size)} REMAINING)
-                    </span>
-                  </div>
-
-                  {/* Unseen Project Sanctums */}
-                  <div className="space-y-1.5">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#d4af37]">
-                      Unseen Project Sanctums ({6 - visitedStopIds.size} Left)
-                    </div>
-                    {visitedStopIds.size === PORTFOLIO_STOPS.length ? (
-                      <div className="p-2 bg-[#07161b] border border-[#2dd4bf]/40 text-[#2dd4bf] font-semibold text-[11px]">
-                        ★ All 6 Project Sanctums have been discovered and awakened!
-                      </div>
-                    ) : (
-                      PORTFOLIO_STOPS.filter((s) => !visitedStopIds.has(s.id)).map((s) => (
-                        <div
-                          key={s.id}
-                          className="flex items-center justify-between gap-2 p-2 bg-[#171207] border-l-2 border-[#d4af37]"
-                        >
-                          <div>
-                            <div className="font-semibold text-[#fef08a]">
-                              {s.indexNumber}. {s.title}
-                            </div>
-                            <div className="text-[10px] text-[#cbd5e1]">{s.category}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSummaryScrollOpen(false);
-                              onResumeFromMastery();
-                              onTeleportToStop(s.id);
-                            }}
-                            className="px-2.5 py-1 clip-blade-right bg-[#d4af37] hover:bg-[#fef08a] text-[#05070b] font-hud text-[9px] font-extrabold uppercase tracking-wider cursor-pointer shrink-0"
-                          >
-                            Teleport &amp; See →
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Unseen Career Experience Lotus Jewels */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#e879f9]">
-                      Uncollected Career Jewels ({5 - collectedRelicIds.size} Left)
-                    </div>
-                    {collectedRelicIds.size === LOTUS_RELICS.length ? (
-                      <div className="p-2 bg-[#160b24] border border-[#c084fc]/40 text-[#e879f9] font-semibold text-[11px]">
-                        ★ All 5 Career Experience Lotus Jewels collected!
-                      </div>
-                    ) : (
-                      LOTUS_RELICS.filter((r) => !collectedRelicIds.has(r.id)).map((r) => (
-                        <div
-                          key={r.id}
-                          className="flex items-center justify-between gap-2 p-2 bg-[#160d21] border-l-2 border-[#c084fc]"
-                        >
-                          <div>
-                            <div className="font-semibold text-[#f3e8ff]">
-                              ❖ {r.company} ({r.era})
-                            </div>
-                            <div className="text-[10px] text-[#cbd5e1]">{r.name}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSummaryScrollOpen(false);
-                              onResumeFromMastery();
-                              onSelectGuidanceTarget?.(r.id, 'jewel');
-                              onTeleportToPoint?.(
-                                r.position.x,
-                                r.position.z + 1.8,
-                                `JEWEL · ${r.company}`
-                              );
-                            }}
-                            className="px-2.5 py-1 clip-blade-right bg-[#c084fc] hover:bg-[#e879f9] text-[#05070b] font-hud text-[9px] font-extrabold uppercase tracking-wider cursor-pointer shrink-0"
-                          >
-                            Teleport &amp; Collect →
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {/* Unvanquished Corporate Asuras & Boss */}
-                  <div className="space-y-1 pt-1">
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-[#fda4af]">
-                      Remaining Corporate Threats in the World ({aliveDemons + (telemetry.bossDefeated ? 0 : 1)} Left)
-                    </div>
-                    {!telemetry.bossDefeated && (
-                      <div className="flex items-center justify-between gap-2 p-2 bg-[#240813] border-l-2 border-[#f43f5e]">
-                        <span className="text-[10px] font-bold text-[#fecdd3]">
-                          ⚔ THE SEPTEMBER LAYOFF — "YOUR ROLE HAS BEEN IMPACTED"
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSummaryScrollOpen(false);
-                            onResumeFromMastery();
-                            onSummonLayoffBoss();
-                          }}
-                          className="px-2 py-0.5 bg-[#e11d48] hover:bg-[#f43f5e] text-white font-hud text-[9px] font-bold uppercase cursor-pointer shrink-0"
-                        >
-                          Confront Boss →
-                        </button>
-                      </div>
-                    )}
-                    {INITIAL_DEMON_SPAWNS.filter(
-                      (d) => !telemetry.vanquishedDemonIds?.includes(d.id)
-                    ).map((d) => (
-                      <div
-                        key={d.id}
-                        className="flex items-center justify-between gap-2 p-1.5 bg-[#170910] border-l border-[#f43f5e]/50 text-[10px] text-[#fda4af]"
-                      >
-                        <span className="truncate">• {d.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSummaryScrollOpen(false);
-                            onResumeFromMastery();
-                            onTeleportToPoint?.(d.position.x, d.position.z + 3.5, d.name);
-                          }}
-                          className="px-2 py-0.5 bg-[#881337] hover:bg-[#be123c] text-white font-hud text-[8px] uppercase cursor-pointer shrink-0"
-                        >
-                          Hunt →
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Scroll Footer Actions */}
-            <div className="px-5 py-3.5 bg-[#050811] border-t border-[#d4af37]/30 flex flex-wrap items-center justify-between gap-3 shrink-0 font-hud text-xs uppercase tracking-wider">
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={CREATOR_PROFILE.calUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 clip-blade-right bg-[#d4af37] hover:bg-[#fde68a] text-[#05070b] font-extrabold cursor-pointer"
-                >
-                  Book Call with Ayush
-                </a>
-                <a
-                  href={CREATOR_PROFILE.resumeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3.5 py-2 border border-[#d4af37] bg-[#0c1322] hover:bg-[#172338] text-[#f8f5ee] font-bold cursor-pointer"
-                >
-                  Resume (PDF)
-                </a>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
+             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 pt-4">
                 <button
-                  type="button"
-                  onClick={() => {
-                    setSummaryScrollOpen(false);
-                    onRestartFromBeginning();
-                  }}
-                  className="px-3.5 py-2 border border-[#f43f5e]/50 bg-[#1f0812] hover:bg-[#380e20] text-[#fda4af] font-bold cursor-pointer"
+                   onClick={() => onRestartFromBeginning()}
+                   className="px-10 py-3 glass-button font-mythic text-sm tracking-[0.2em] uppercase text-white hover:scale-105 active:scale-95 transition-all"
                 >
-                  ↻ Restart Verse
+                   Retry Journey
                 </button>
                 <button
-                  type="button"
-                  data-testid="continue-exploring-btn"
-                  onClick={() => {
-                    setSummaryScrollOpen(false);
-                    onResumeFromMastery();
-                  }}
-                  className="px-5 py-2 clip-blade-right bg-[#0d9488] hover:bg-[#14b8a6] text-[#f8f5ee] font-extrabold cursor-pointer"
+                   onClick={() => onReturnToTitle()}
+                   className="px-10 py-3 text-white/40 hover:text-white font-hud text-[11px] tracking-[0.3em] uppercase transition-colors"
                 >
-                  Continue Exploring World →
+                   Return to Title
                 </button>
-              </div>
-            </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. PAUSE FULL-SCREEN MODAL */}
+      {gameState === 'paused' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/85 backdrop-blur-sm pointer-events-auto">
+          <div className="w-full max-w-sm text-center space-y-8 animate-fade-in">
+             <div className="space-y-2">
+                <h2 className="font-mythic text-3xl tracking-[0.2em] uppercase text-white">PAUSED</h2>
+                <div className="h-[1px] w-24 mx-auto bg-[#d4af37]/40" />
+             </div>
+
+             <nav className="flex flex-col gap-3">
+                <button 
+                  onClick={() => onTogglePause()}
+                  className="w-full py-4 glass-panel border-[#d4af37]/20 hover:bg-[#d4af37]/10 text-white font-mythic text-sm tracking-[0.2em] uppercase transition-all"
+                >
+                  Resume
+                </button>
+                <button 
+                  onClick={() => onResetSpawn()}
+                  className="w-full py-3 bg-white/5 border border-white/10 text-white/60 hover:text-white font-hud text-[10px] tracking-[0.2em] uppercase transition-all"
+                >
+                  Reset to Spawn
+                </button>
+                <button 
+                  onClick={() => onReturnToTitle()}
+                  className="w-full py-3 text-white/30 hover:text-white font-hud text-[9px] tracking-[0.2em] uppercase transition-colors"
+                >
+                  Exit to Title
+                </button>
+             </nav>
           </div>
         </div>
       )}

@@ -168,11 +168,15 @@ interface MobileRpgControlPadProps {
   onTriggerDash?: () => void;
   onTriggerGrapple: () => void;
   onInteractContext?: () => void;
+  onTogglePause?: () => void;
+  onCycleWeapon?: () => void;
+  onCycleTime?: () => void;
   contextActionLabel?: string | null;
   comboStage?: 1 | 2 | 3;
   grappleAvailable?: boolean;
   isGliding?: boolean;
   lightningUnlocked?: boolean;
+  lightningCooldown?: number;
   unlockedProjectsCount?: number;
 }
 
@@ -190,11 +194,15 @@ export const MobileRpgControlPad: React.FC<MobileRpgControlPadProps> = ({
   onTriggerDash,
   onTriggerGrapple,
   onInteractContext,
+  onTogglePause,
+  onCycleWeapon,
+  onCycleTime,
   contextActionLabel,
   comboStage = 1,
   grappleAvailable = false,
   isGliding = false,
   lightningUnlocked = false,
+  lightningCooldown = 0,
   unlockedProjectsCount = 0,
 }) => {
   const padRef = useRef<HTMLDivElement | null>(null);

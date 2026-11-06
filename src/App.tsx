@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PORTFOLIO_STOPS, LotusRelic } from './data/portfolioStops';
 import { TimeOfDay } from './game/proceduralScene';
@@ -15,10 +10,6 @@ import { StopModal } from './components/StopModal';
 import { HypoGuideModal } from './components/HypoGuideModal';
 import { RecruiterTempleModal } from './components/RecruiterTempleModal';
 import { LandscapeOrientationGate } from './components/MobileRpgPad';
-import { db } from './firebase';
-import { collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp } from 'firebase/firestore';
-
-export type GameMode = 'portfolio' | 'survival';
 
 export default function App() {
   const [gameState, setGameState] = useState<
@@ -32,11 +23,6 @@ export default function App() {
     }
     return 'title';
   });
-
-  const [gameMode, setGameMode] = useState<GameMode>('portfolio');
-  const [survivalWave, setSurvivalWave] = useState(1);
-  const [survivalScore, setSurvivalScore] = useState(0);
-  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; wave: number }[]>([]);
 
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [visitedStopIds, setVisitedStopIds] = useState<Set<string>>(() => new Set());
@@ -88,39 +74,7 @@ export default function App() {
   // Mirror game state to document.body.dataset.state
   useEffect(() => {
     document.body.dataset.state = gameState;
-    document.body.dataset.mode = gameMode;
-  }, [gameState, gameMode]);
-
-  const fetchLeaderboard = useCallback(async () => {
-    try {
-      const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
-      const querySnapshot = await getDocs(q);
-      const entries = querySnapshot.docs.map(doc => doc.data() as { name: string; score: number; wave: number });
-      setLeaderboard(entries);
-    } catch (err) {
-      console.error('Failed to fetch leaderboard:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (gameState === 'title') {
-      fetchLeaderboard();
-    }
-  }, [gameState, fetchLeaderboard]);
-
-  const saveSurvivalScore = useCallback(async (name: string, score: number, wave: number) => {
-    try {
-      await addDoc(collection(db, 'leaderboard'), {
-        name,
-        score,
-        wave,
-        timestamp: serverTimestamp(),
-      });
-      fetchLeaderboard();
-    } catch (err) {
-      console.error('Failed to save score:', err);
-    }
-  }, [fetchLeaderboard]);
+  }, [gameState]);
 
   // Announce that the Boss Challenge Circle & Sky-Lightning Bolt are unlocked once all 6 Project Scrolls are viewed (without auto-spawning the boss!)
   useEffect(() => {
@@ -138,10 +92,7 @@ export default function App() {
     }
   }, [visitedStopIds, activeStopId, bossAnnounced, showToast]);
 
-  const handleStartFromTitle = useCallback((mode: GameMode = 'portfolio') => {
-    setGameMode(mode);
-    setSurvivalWave(1);
-    setSurvivalScore(0);
+  const handleStartFromTitle = useCallback(() => {
     document.body.dataset.state = 'playing';
     setGameState('playing');
     sound.playTempleBell(432);
@@ -365,7 +316,6 @@ export default function App() {
         activeStopId={anyOverlayOpen}
         visitedStopIds={visitedStopIds}
         collectedRelicIds={collectedRelicIds}
-        gameMode={gameMode}
         onTelemetryUpdate={setTelemetry}
         onInspectStop={handleInspectStop}
         onCloseStop={() => {
@@ -389,10 +339,9 @@ export default function App() {
         <TitleScreen
           onStart={handleStartFromTitle}
           onInspectProject={(stopId) => {
-            handleStartFromTitle('portfolio');
+            handleStartFromTitle();
             handleTeleportToStop(stopId);
           }}
-          leaderboard={leaderboard}
           gamepadConnected={gamepadConnected}
         />
       )}
@@ -401,7 +350,6 @@ export default function App() {
       {gameState !== 'title' && (
         <HudOverlay
           gameState={gameState}
-          gameMode={gameMode}
           telemetry={telemetry}
           visitedStopIds={visitedStopIds}
           collectedRelicIds={collectedRelicIds}
@@ -429,7 +377,6 @@ export default function App() {
           onResetSpawn={handleResetSpawn}
           onRestartFromBeginning={handleRestartFromBeginning}
           onReturnToTitle={handleReturnToTitle}
-          onSaveScore={saveSurvivalScore}
           onResumeFromMastery={handleResumeFromMastery}
           onVirtualMove={(f, r) => controllerRef.current?.setVirtualInput(f, r)}
           onVirtualJump={() => controllerRef.current?.triggerVirtualJump()}
