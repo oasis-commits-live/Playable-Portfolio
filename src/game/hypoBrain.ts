@@ -1,6 +1,7 @@
 import {
   CREATOR_PROFILE,
   PORTFOLIO_STOPS,
+  UNFINISHED_SANCTUMS,
   LOTUS_RELICS,
   FORGE_WEAPONS,
   RECRUITER_TEMPLE_CONFIG,
@@ -48,6 +49,11 @@ export function buildHypoSystemInstruction(ctx: HypoContextState): string {
       `- [${s.id}] "${s.title}" (${s.sanskritTitle}, Role: ${s.project.role}, Timeline: ${s.project.year}): ${s.project.approachSummary} Key Impact: ${s.project.impactMetric} — ${s.project.resultsImpact}`
   ).join('\n');
 
+  const unfinishedSummary = UNFINISHED_SANCTUMS.map(
+    (u) =>
+      `- [${u.id}] "${u.title}" at (${u.position.x}, ${u.position.z}) [UNDER CONSTRUCTION / SEALED SANCTUM — ONLY REVEAL THESE EXACT FACTS: ${u.revealedPoints.join(' | ')}]`
+  ).join('\n');
+
   const jewelsSummary = LOTUS_RELICS.map(
     (r) => `- [${r.id}] ${r.company} (${r.era}): ${r.meaning}`
   ).join('\n');
@@ -73,6 +79,9 @@ CREATOR PROFILE:
 THE 6 SHIPPED PORTFOLIO PROJECT SANCTUMS IN THIS 3D WORLD:
 ${projectsSummary}
 
+THE 2 UNFINISHED / UNDER-CONSTRUCTION SANCTUMS (WITH STHAPATI WORKERS BUILDING THEM):
+${unfinishedSummary}
+
 THE 5 CAREER EXPERIENCE JEWELS IN THIS 3D WORLD:
 ${jewelsSummary}
 
@@ -92,8 +101,9 @@ LIVE PLAYER STATE:
 
 RESPONSE RULES:
 1. Keep your reply conversational, warm, concise (2 to 4 sentences max), and specific to Ayush Dubey's real work or the 3D world.
-2. Whenever the user asks about a specific project, skill, hiring/contacting Ayush, weapons, or the boss, set an appropriate "action" in your JSON response so the player can either be guided/teleported there or click the action chip.
-3. Return valid JSON matching this schema:
+2. For the 2 Under-Construction Sanctums (AdTech Sanctum & Sisyphean Rage Game), NEVER invent extra details beyond their exact permitted reveal points, and mention that Sthapati workers are still constructing those sanctums on the Southern Terraces.
+3. Whenever the user asks about a specific project, skill, hiring/contacting Ayush, weapons, or the boss, set an appropriate "action" in your JSON response so the player can either be guided/teleported there or click the action chip.
+4. Return valid JSON matching this schema:
 {
   "reply": "string (2-4 concise, helpful sentences)",
   "action": {
@@ -208,6 +218,25 @@ export function resolveLocalHypoChat(
         'Tell me about Oasis Gamified Learning',
         'Show me the CFO AI Workspace',
         'How do I glide from the mountains?',
+      ],
+    };
+  }
+
+  // 5b. Unfinished / Under-Construction Sanctums (AdTech & Sisyphean Rage Game)
+  if (
+    /\b(adtech|ad tech|publishing ads|sales ops|4 days|sisyphean|sisyphus|rage|steam|unfinished|under construction|construction|wip|workers)\b/.test(
+      q
+    )
+  ) {
+    return {
+      reply: `There are two Under-Construction Sanctums on the Southern Terraces where Sthapati workers are actively building! On the South-East Terrace (26, 44) is an unfinished AdTech sanctum (1. AdTech, 2. Sped up publishing ads across platforms, 3. Increased productivity in the sales ops team, 4. Idea to Product in 4 days). On the South-West Terrace (-26, 44) is an unfinished Game sanctum (1. Sisyphean game based on rage, 2. Coming soon on Steam). Both sanctums are sealed while under construction!`,
+      action: {
+        type: 'none',
+      },
+      followUpPrompts: [
+        'Show me the 6 completed Project Sanctums',
+        'Tell me about the CFO AI Workspace',
+        'Take me to the Temple of Opportunities',
       ],
     };
   }

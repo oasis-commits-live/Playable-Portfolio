@@ -30,6 +30,7 @@ import {
   canCastLightningBolt,
   computeBossMeleeMultiplier,
   computeLightningBoltDamage,
+  findNearestUnfinishedSanctum,
   BASE_WALK_SPEED,
   SPRINT_MULTIPLIER,
   PARAGLIDE_TERMINAL_VY,
@@ -37,10 +38,12 @@ import {
 } from './worldLogic';
 import {
   PORTFOLIO_STOPS,
+  UNFINISHED_SANCTUMS,
   LOTUS_RELICS,
   FORGE_WEAPONS,
   INITIAL_DEMON_SPAWNS,
   RECRUITER_TEMPLE_CONFIG,
+  LAYOFF_BOSS_CONFIG,
   HYPO_GUIDE_CONFIG,
 } from '../data/portfolioStops';
 
@@ -480,4 +483,110 @@ test('resolveLocalHypoChat answers conversational questions about portfolio proj
   assert.ok(hireResp.reply.includes('ayush.dubeypd@gmail.com'));
   assert.equal(hireResp.action?.type, 'teleport_temple');
 });
+
+test('computeDirectionalGuidance and findNextGuidanceSanctum provide step-by-step bearings and turn instructions', async () => {
+  const { computeDirectionalGuidance, findNextGuidanceSanctum } = await import('./worldLogic');
+
+  // At spawn (0, 8.2), first unvisited sanctum must be 01 (mandapa-origin)
+  const visited = new Set<string>();
+  const firstStep = findNextGuidanceSanctum({ x: 0, z: 8.2 }, visited);
+  assert.ok(firstStep, 'Should find first unvisited sanctum');
+  assert.equal(firstStep!.stop.id, 'mandapa-origin');
+  assert.equal(firstStep!.stop.indexNumber, '01');
+
+  // After visiting 01, next sanctum must be 02 (jantar-observatory)
+  visited.add('mandapa-origin');
+  const secondStep = findNextGuidanceSanctum({ x: 0, z: 8.2 }, visited);
+  assert.equal(secondStep!.stop.id, 'jantar-observatory');
+  assert.equal(secondStep!.stop.indexNumber, '02');
+
+  // Looking straight North (headingDeg = 0) toward a target straight North (0, -20)
+  const straightNorth = computeDirectionalGuidance({ x: 0, z: 0 }, { x: 0, z: -20 }, 0);
+  assert.equal(straightNorth.cardinalLabel, 'N');
+  assert.equal(straightNorth.turnDirection, 'ahead');
+  assert.equal(straightNorth.turnInstruction, 'Straight Ahead');
+  assert.equal(straightNorth.distance, 20);
+
+  // Looking North (0 deg) when target is due East (25, 0) -> Turn Right [E]
+  const turnEast = computeDirectionalGuidance({ x: 0, z: 0 }, { x: 25, z: 0 }, 0);
+  assert.equal(turnEast.cardinalLabel, 'E');
+  assert.equal(turnEast.turnDirection, 'right');
+  assert.equal(turnEast.turnInstruction, 'Turn Right');
+
+  // Looking North (0 deg) when target is due West (-25, 0) -> Turn Left [W]
+  const turnWest = computeDirectionalGuidance({ x: 0, z: 0 }, { x: -25, z: 0 }, 0);
+  assert.equal(turnWest.cardinalLabel, 'W');
+  assert.equal(turnWest.turnDirection, 'left');
+  assert.equal(turnWest.turnInstruction, 'Turn Left');
+
+  // Looking North (0 deg) when target is due South (0, 30) -> Behind You
+  const behindSouth = computeDirectionalGuidance({ x: 0, z: 0 }, { x: 0, z: 30 }, 0);
+  assert.equal(behindSouth.cardinalLabel, 'S');
+  assert.equal(behindSouth.turnDirection, 'behind');
+});
+
+test('UNFINISHED_SANCTUMS enforce exact allowed reveal points, do not interfere with any existing sanctum/landmark, and detect proximity accurately', () => {
+  assert.equal(UNFINISHED_SANCTUMS.length, 2, 'Should define exactly 2 unfinished sanctums');
+
+  const adtech = UNFINISHED_SANCTUMS.find((s) => s.id === 'wip-adtech-sanctum');
+  assert.ok(adtech, 'Should include the unfinished AdTech sanctum');
+  assert.deepEqual(adtech.revealedPoints, [
+    'AdTech',
+    'Sped up the process of publishing ads on different platforms',
+    'Increased productivity in sales ops team',
+    'Idea to Product in 4 days',
+  ]);
+  assert.ok(adtech.workerCount >= 3, 'AdTech sanctum should have multiple workers around it');
+
+  const sisyphean = UNFINISHED_SANCTUMS.find((s) => s.id === 'wip-sisyphean-game');
+  assert.ok(sisyphean, 'Should include the unfinished Sisyphean Rage Game sanctum');
+  assert.deepEqual(sisyphean.revealedPoints, [
+    'Sisyphean game based on rage',
+    'Coming soon on Steam',
+  ]);
+  assert.ok(sisyphean.workerCount >= 3, 'Sisyphean sanctum should have multiple workers around it');
+
+  // Verify neither unfinished sanctum interferes with any of the 6 PORTFOLIO_STOPS, Recruiter Temple, or Boss Arena
+  for (const wip of UNFINISHED_SANCTUMS) {
+    for (const stop of PORTFOLIO_STOPS) {
+      const dist = Math.hypot(wip.position.x - stop.position.x, wip.position.z - stop.position.z);
+      assert.ok(
+        dist > 20,
+        `Unfinished sanctum ${wip.id} must be > 20m away from ${stop.id} (got ${dist.toFixed(1)}m)`
+      );
+    }
+
+    const templeDist = Math.hypot(
+      wip.position.x - RECRUITER_TEMPLE_CONFIG.position.x,
+      wip.position.z - RECRUITER_TEMPLE_CONFIG.position.z
+    );
+    assert.ok(templeDist > 20, `Unfinished sanctum ${wip.id} must not overlap Recruiter Temple`);
+
+    const bossDist = Math.hypot(
+      wip.position.x - LAYOFF_BOSS_CONFIG.spawnPosition.x,
+      wip.position.z - LAYOFF_BOSS_CONFIG.spawnPosition.z
+    );
+    assert.ok(bossDist > 50, `Unfinished sanctum ${wip.id} must not overlap Boss Arena`);
+
+    // Standing at an unfinished sanctum approach should trigger findNearestUnfinishedSanctum, NOT findNearestStop
+    const approachPos = { x: wip.position.x, z: wip.position.z + 5.5 };
+    const nearWip = findNearestUnfinishedSanctum(approachPos);
+    assert.equal(nearWip.inRange, true);
+    assert.equal(nearWip.nearestSanctum.id, wip.id);
+
+    const nearRegularStop = findNearestStop(approachPos);
+    assert.equal(
+      nearRegularStop.inRange,
+      false,
+      `Approaching unfinished sanctum ${wip.id} must not trigger any openable PORTFOLIO_STOP`
+    );
+
+    const regionName = getRegionNameAt(approachPos.x, approachPos.z);
+    assert.ok(
+      regionName.includes('Under Construction'),
+      `Region name at ${wip.id} should indicate Under Construction`
+    );
+  }
+});
+
 

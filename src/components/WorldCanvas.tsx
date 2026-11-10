@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   PORTFOLIO_STOPS,
+  UNFINISHED_SANCTUMS,
   LOTUS_RELICS,
   STORY_CHAPTERS,
   FORGE_WEAPONS,
@@ -10,6 +11,7 @@ import {
   RECRUITER_TEMPLE_CONFIG,
   HYPO_GUIDE_CONFIG,
   LotusRelic,
+  UnfinishedSanctum,
   WeaponId,
 } from '../data/portfolioStops';
 import {
@@ -29,6 +31,7 @@ import {
   dampAngle,
   resolveCollisions,
   findNearestStop,
+  findNearestUnfinishedSanctum,
   findNearestWeaponForge,
   checkRelicPickup,
   computePlayerCombatStats,
@@ -51,13 +54,16 @@ import {
   WorldAffordanceMarker,
   EngagedDemonTelemetry,
 } from './HudOverlay';
-import { findNextGuidanceSanctum } from '../game/worldLogic';
+import {
+  findNextGuidanceSanctum,
+  computeDirectionalGuidance,
+} from '../game/worldLogic';
 
 export interface WorldControllerRef {
   teleportToStop: (stopId: string) => void;
   teleportToPoint: (x: number, z: number, label?: string) => void;
   equipWeapon: (weaponId: WeaponId) => void;
-  setGuidanceTarget: (id: string, kind: 'project' | 'jewel' | 'weapon') => void;
+  setGuidanceTarget: (id: string, kind: 'project' | 'jewel' | 'weapon' | 'wip') => void;
   resetToSpawn: () => void;
   restartFromBeginning: () => void;
   setVirtualInput: (forward: number, right: number) => void;
@@ -234,11 +240,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
     // 2. Build Portfolio Verse 3D Scene + RoomEnvironment PMREM Reflections
     const world = buildAncientWorldScene(renderer, isSoftwareGl);
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    world.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
-
     if (!isSoftwareGl) {
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      world.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmremGenerator.dispose();
       renderer.compile(world.scene, camera);
     }
 
@@ -269,7 +274,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       stamina: 100,
       equippedWeaponId: 'weapon-nandaka' as WeaponId,
       guidanceTargetId: 'mandapa-origin' as string | null,
-      guidanceTargetKind: 'project' as 'project' | 'jewel' | 'weapon',
+      guidanceTargetKind: 'project' as 'project' | 'jewel' | 'weapon' | 'wip',
       attackTimer: 0,
       attackDuration: 0.28,
       attackCooldown: 0,
@@ -896,6 +901,8 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       );
     };
 
+    let lastHudEmitTime = 0;
+
     controllerRef.current = {
       teleportToStop(stopId: string) {
         const stop = PORTFOLIO_STOPS.find((s) => s.id === stopId);
@@ -913,9 +920,14 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.isGliding = false;
         playerState.grappleActive = false;
         playerState.yaw = Math.PI;
+        camState.yaw = 0;
+        camState.pitch = 0.15;
+        camState.currentPos.set(playerState.x + 0.36, playerState.y + 2.15, playerState.z + 4.1);
+        camState.currentLook.set(playerState.x, playerState.y + 1.8, playerState.z - 5.2);
         world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
         world.playerRig.group.rotation.y = playerState.yaw;
         world.particlePool.spawnBurst(playerState.x, playerState.y + 0.5, playerState.z, 16, true);
+        lastHudEmitTime = 0;
         stateRef.current.onInspectStop(stop.id);
       },
       teleportToPoint(x: number, z: number, label?: string) {
@@ -928,8 +940,15 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
         playerState.grounded = true;
         playerState.isGliding = false;
         playerState.grappleActive = false;
+        playerState.yaw = Math.PI;
+        camState.yaw = 0;
+        camState.pitch = 0.15;
+        camState.currentPos.set(x + 0.36, playerState.y + 2.15, z + 4.1);
+        camState.currentLook.set(x, playerState.y + 1.8, z - 5.2);
         world.playerRig.group.position.set(playerState.x, playerState.y, playerState.z);
+        world.playerRig.group.rotation.y = playerState.yaw;
         world.particlePool.spawnBurst(playerState.x, playerState.y + 0.5, playerState.z, 16, true);
+        lastHudEmitTime = 0;
         sound.playTempleBell(528);
         if (label) {
           showCombatCallout(`FAST TRAVEL → ${label.toUpperCase()}`, 1.4);
@@ -938,9 +957,10 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       equipWeapon(weaponId: WeaponId) {
         performEquipWeapon(weaponId);
       },
-      setGuidanceTarget(id: string, kind: 'project' | 'jewel' | 'weapon') {
+      setGuidanceTarget(id: string, kind: 'project' | 'jewel' | 'weapon' | 'wip') {
         playerState.guidanceTargetId = id;
         playerState.guidanceTargetKind = kind;
+        lastHudEmitTime = 0;
       },
       resetToSpawn() {
         playerState.x = 0;
@@ -1168,13 +1188,31 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               e.preventDefault();
               performEquipWeapon(nearForge.nearestWeapon.id);
             } else {
-              const near = findNearestStop(playerPos2D);
-              if (near.inRange) {
+              const nearWip = findNearestUnfinishedSanctum(playerPos2D);
+              if (nearWip.inRange) {
                 e.preventDefault();
-                if (stateRef.current.activeStopId === near.nearestStop.id) {
-                  stateRef.current.onCloseStop();
-                } else {
-                  stateRef.current.onInspectStop(near.nearestStop.id);
+                // Unfinished sanctums CANNOT be opened!
+                sound.playParryClang(false);
+                world.particlePool.spawnBurst(
+                  nearWip.nearestSanctum.position.x,
+                  playerState.y + 1.4,
+                  nearWip.nearestSanctum.position.z + 2.4,
+                  18,
+                  true
+                );
+                showCombatCallout(
+                  `🚧 ${nearWip.nearestSanctum.title.toUpperCase()} IS UNDER CONSTRUCTION — STHAPATI WORKERS STILL BUILDING!`,
+                  2.4
+                );
+              } else {
+                const near = findNearestStop(playerPos2D);
+                if (near.inRange) {
+                  e.preventDefault();
+                  if (stateRef.current.activeStopId === near.nearestStop.id) {
+                    stateRef.current.onCloseStop();
+                  } else {
+                    stateRef.current.onInspectStop(near.nearestStop.id);
+                  }
                 }
               }
             }
@@ -1196,7 +1234,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let touchStartClientY = 0;
     let touchMovedDist = 0;
 
-    // Direct 3D Raycast Picking on Hypo Guide, Recruiter Temple, Boss Challenge Circle, Monuments, Weapon Forges & Relics
+    // Direct 3D Raycast Picking on Hypo Guide, Recruiter Temple, Boss Challenge Circle, Monuments, Unfinished Sanctums, Weapon Forges & Relics
     const _ndcPointer = new THREE.Vector2();
     const tryInteractWith3DWorldAtClientPoint = (clientX: number, clientY: number): boolean => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1283,6 +1321,30 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             playerState.guidanceTargetKind = 'project';
             sound.playTempleBell(528);
             showCombatCallout(`TRACKING SANCTUM → ${stop.title.toUpperCase()}`, 1.4);
+          }
+          return true;
+        }
+      }
+
+      // 2B) Check Unfinished / Under-Construction Sanctums (clicking never opens a modal!)
+      for (const wip of UNFINISHED_SANCTUMS) {
+        const wipRig = world.unfinishedSanctumRigs.get(wip.id);
+        if (!wipRig) continue;
+        const hits = _raycaster.intersectObject(wipRig.group, true);
+        if (hits.length > 0) {
+          const dist = Math.hypot(wip.position.x - playerState.x, wip.position.z - playerState.z);
+          if (dist <= 11.5) {
+            sound.playParryClang(false);
+            world.particlePool.spawnBurst(wip.position.x, playerState.y + 1.5, wip.position.z + 2.2, 16, true);
+            showCombatCallout(
+              `🚧 ${wip.title.toUpperCase()} IS SEALED — STHAPATI WORKERS STILL BUILDING!`,
+              2.4
+            );
+          } else {
+            playerState.guidanceTargetId = wip.id;
+            playerState.guidanceTargetKind = 'wip';
+            sound.playTempleBell(528);
+            showCombatCallout(`TRACKING WIP SITE → ${wip.title.toUpperCase()}`, 1.4);
           }
           return true;
         }
@@ -1498,7 +1560,6 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
     let isDisposed = false;
     let lastTime = performance.now();
     let elapsedTotal = 0;
-    let lastHudEmitTime = 0;
     let lastGameStateInTick = gameState;
 
     function afterDraw(cb: () => void) {
@@ -1705,7 +1766,9 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
       );
 
       for (const d of world.demons) {
-        d.hpBarGroup.visible = currentMode !== 'title' && d.alive;
+        const distToPlayer = Math.hypot(d.x - playerState.x, d.z - playerState.z);
+        const showBar = d.state !== 'patrol' || d.hp < d.maxHp || distToPlayer < 12.5;
+        d.hpBarGroup.visible = currentMode !== 'title' && d.alive && showBar;
       }
 
       if (currentMode === 'title') {
@@ -2457,18 +2520,67 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
         const nearInfo = findNearestStop({ x: playerState.x, z: playerState.z });
         const nearStop = nearInfo.inRange ? nearInfo.nearestStop : null;
+        const nearWipInfo = findNearestUnfinishedSanctum({ x: playerState.x, z: playerState.z });
+        const nearUnfinishedSanctum: UnfinishedSanctum | null = nearWipInfo.inRange
+          ? nearWipInfo.nearestSanctum
+          : null;
         const nearForgeInfo = findNearestWeaponForge({ x: playerState.x, z: playerState.z });
         const nearWeaponForge = nearForgeInfo.inRange ? nearForgeInfo.nearestWeapon : null;
 
         // 7. Update 3D Golden Prana Guidance Trail toward Tracked Objective
         let resolvedTracked: HudTelemetry['trackedTarget'] = null;
+        let trackedBeaconWorld: {
+          x: number;
+          y: number;
+          z: number;
+          title: string;
+          subtitle: string;
+          stopId: string;
+          indexNumber?: string;
+          accentColor: string;
+        } | null = null;
+
         if (playerState.guidanceTargetKind === 'project') {
+          const firstUnvisited = PORTFOLIO_STOPS.find((s) => !visitedStopsNow.has(s.id));
           let targetStop = PORTFOLIO_STOPS.find((s) => s.id === playerState.guidanceTargetId);
-          if (!targetStop || visitedStopsNow.has(targetStop.id)) {
-            const firstUnvisited = PORTFOLIO_STOPS.find((s) => !visitedStopsNow.has(s.id));
+          if (!targetStop || (visitedStopsNow.has(targetStop.id) && firstUnvisited)) {
             if (firstUnvisited) targetStop = firstUnvisited;
           }
-          if (targetStop) {
+
+          if (!firstUnvisited && visitedStopsNow.size >= PORTFOLIO_STOPS.length && !boss.defeated) {
+            const bossCircleX = LAYOFF_BOSS_CONFIG.challengeCirclePosition.x;
+            const bossCircleZ = LAYOFF_BOSS_CONFIG.challengeCirclePosition.z;
+            const d = Math.round(
+              Math.hypot(bossCircleX - playerState.x, bossCircleZ - playerState.z)
+            );
+            resolvedTracked = {
+              id: 'boss-circle',
+              kind: 'project',
+              title: 'Northern Boss Challenge Circle',
+              subtitle: 'All 6 Sanctums Unlocked · Final Challenge',
+              distance: d,
+              accentColor: '#f43f5e',
+            };
+            trackedBeaconWorld = {
+              x: bossCircleX,
+              y: groundHeightAt(bossCircleX, bossCircleZ) + 4.4,
+              z: bossCircleZ,
+              title: 'Northern Boss Challenge Circle',
+              subtitle: 'All 6 Sanctums Unlocked · Press [E] or [B]',
+              stopId: 'boss-circle',
+              indexNumber: '⚔',
+              accentColor: '#f43f5e',
+            };
+            world.updateGuidanceTrail(
+              !activeStopIdNow && !boss.awakened,
+              playerState.x,
+              playerState.z,
+              bossCircleX,
+              bossCircleZ,
+              '#f43f5e',
+              elapsedTotal
+            );
+          } else if (targetStop) {
             const d = Math.round(
               Math.hypot(targetStop.position.x - playerState.x, targetStop.position.z - playerState.z)
             );
@@ -2478,6 +2590,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
               title: targetStop.title,
               subtitle: `Project Sanctum ${targetStop.indexNumber}`,
               distance: d,
+              accentColor: targetStop.accentColor,
+            };
+            trackedBeaconWorld = {
+              x: targetStop.position.x,
+              y: groundHeightAt(targetStop.position.x, targetStop.position.z) + 5.6,
+              z: targetStop.position.z,
+              title: targetStop.title,
+              subtitle: `Sanctum ${targetStop.indexNumber} · ${targetStop.category}`,
+              stopId: targetStop.id,
+              indexNumber: targetStop.indexNumber,
               accentColor: targetStop.accentColor,
             };
             world.updateGuidanceTrail(
@@ -2506,6 +2628,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             distance: d,
             accentColor: '#c084fc',
           };
+          trackedBeaconWorld = {
+            x: targetRelic.position.x,
+            y: groundHeightAt(targetRelic.position.x, targetRelic.position.z) + 2.6,
+            z: targetRelic.position.z,
+            title: `${targetRelic.company} Jewel`,
+            subtitle: `Career Relic · ${targetRelic.era}`,
+            stopId: targetRelic.id,
+            indexNumber: '❖',
+            accentColor: '#c084fc',
+          };
           world.updateGuidanceTrail(
             !activeStopIdNow,
             playerState.x,
@@ -2532,6 +2664,16 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             distance: d,
             accentColor: targetWeapon.colorHex,
           };
+          trackedBeaconWorld = {
+            x: targetWeapon.position.x,
+            y: groundHeightAt(targetWeapon.position.x, targetWeapon.position.z) + 3.4,
+            z: targetWeapon.position.z,
+            title: targetWeapon.name,
+            subtitle: `Weapon Forge · +${targetWeapon.baseDamageBonus} ATK`,
+            stopId: targetWeapon.id,
+            indexNumber: '⚔',
+            accentColor: targetWeapon.colorHex,
+          };
           world.updateGuidanceTrail(
             !activeStopIdNow,
             playerState.x,
@@ -2539,6 +2681,40 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             targetWeapon.position.x,
             targetWeapon.position.z,
             targetWeapon.colorHex,
+            elapsedTotal
+          );
+        } else if (playerState.guidanceTargetKind === 'wip') {
+          const targetWip =
+            UNFINISHED_SANCTUMS.find((u) => u.id === playerState.guidanceTargetId) ||
+            UNFINISHED_SANCTUMS[0];
+          const d = Math.round(
+            Math.hypot(targetWip.position.x - playerState.x, targetWip.position.z - playerState.z)
+          );
+          resolvedTracked = {
+            id: targetWip.id,
+            kind: 'wip',
+            title: targetWip.title,
+            subtitle: 'Under Construction · Sealed',
+            distance: d,
+            accentColor: targetWip.accentColor,
+          };
+          trackedBeaconWorld = {
+            x: targetWip.position.x,
+            y: groundHeightAt(targetWip.position.x, targetWip.position.z) + 5.6,
+            z: targetWip.position.z,
+            title: targetWip.title,
+            subtitle: `${targetWip.category} · Under Construction`,
+            stopId: targetWip.id,
+            indexNumber: '🚧',
+            accentColor: targetWip.accentColor,
+          };
+          world.updateGuidanceTrail(
+            !activeStopIdNow,
+            playerState.x,
+            playerState.z,
+            targetWip.position.x,
+            targetWip.position.z + 5.8,
+            targetWip.accentColor,
             elapsedTotal
           );
         }
@@ -2798,6 +2974,47 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
 
           const nextGuidance = findNextGuidanceSanctum(playerPos2D, visitedStopsNow);
 
+          let waypointScreen: HudTelemetry['waypointScreen'] = null;
+          if (trackedBeaconWorld && !activeStopIdNow && !boss.awakened) {
+            const dirInfo = computeDirectionalGuidance(
+              playerPos2D,
+              { x: trackedBeaconWorld.x, z: trackedBeaconWorld.z },
+              headingDeg
+            );
+            _projVec.set(trackedBeaconWorld.x, trackedBeaconWorld.y, trackedBeaconWorld.z);
+            _projVec.project(camera);
+            const inFront = _projVec.z >= -1 && _projVec.z <= 1;
+            const rawX = (_projVec.x * 0.5 + 0.5) * 100;
+            const rawY = (-_projVec.y * 0.5 + 0.5) * 100;
+            const isInsideViewport =
+              inFront && rawX >= 10 && rawX <= 90 && rawY >= 14 && rawY <= 78;
+
+            waypointScreen = {
+              xPct: isInsideViewport
+                ? THREE.MathUtils.clamp(rawX, 12, 88)
+                : dirInfo.relativeBearingDeg < 0
+                ? 7
+                : 93,
+              yPct: isInsideViewport ? THREE.MathUtils.clamp(rawY, 16, 74) : 48,
+              distance: dirInfo.distance,
+              title: trackedBeaconWorld.title,
+              subtitle: trackedBeaconWorld.subtitle,
+              stopId: trackedBeaconWorld.stopId,
+              indexNumber: trackedBeaconWorld.indexNumber,
+              accentColor: trackedBeaconWorld.accentColor,
+              isOffScreen: !isInsideViewport,
+              bearingDeg: dirInfo.bearingDeg,
+              relativeBearingDeg: dirInfo.relativeBearingDeg,
+              cardinalLabel: dirInfo.cardinalLabel,
+              turnDirection: dirInfo.turnDirection,
+              turnInstruction: dirInfo.turnInstruction,
+            };
+          }
+
+          const nextGuidanceDir = nextGuidance
+            ? computeDirectionalGuidance(playerPos2D, nextGuidance.stop.position, headingDeg)
+            : null;
+
           stateRef.current.onTelemetryUpdate({
             x: playerState.x,
             z: playerState.z,
@@ -2805,6 +3022,7 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             regionName: getRegionNameAt(playerState.x, playerState.z),
             nearStop,
             nearDistance: nearInfo.distance,
+            nearUnfinishedSanctum,
             nearWeaponForge,
             nearRecruiterTemple: isNearRecruiterTemple(playerPos2D).inRange,
             nearHypoGuide: isNearHypoGuide(playerPos2D).inRange,
@@ -2848,11 +3066,22 @@ export const WorldCanvas: React.FC<WorldCanvasProps> = ({
             combatCallout: playerState.combatCallout,
             combatPopups: projectedPopups,
             affordanceMarkers: trimmedMarkers,
-            waypointScreen: null,
-            nextGuidanceSanctum: nextGuidance ? {
-              title: nextGuidance.stop.title,
-              distance: Math.round(nextGuidance.distance)
-            } : null,
+            waypointScreen,
+            nextGuidanceSanctum:
+              nextGuidance && nextGuidanceDir
+                ? {
+                    stopId: nextGuidance.stop.id,
+                    indexNumber: nextGuidance.stop.indexNumber,
+                    title: nextGuidance.stop.title,
+                    distance: nextGuidanceDir.distance,
+                    accentColor: nextGuidance.stop.accentColor,
+                    bearingDeg: nextGuidanceDir.bearingDeg,
+                    relativeBearingDeg: nextGuidanceDir.relativeBearingDeg,
+                    cardinalLabel: nextGuidanceDir.cardinalLabel,
+                    turnDirection: nextGuidanceDir.turnDirection,
+                    turnInstruction: nextGuidanceDir.turnInstruction,
+                  }
+                : null,
           });
         }
       }

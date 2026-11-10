@@ -1,11 +1,13 @@
 import {
   PORTFOLIO_STOPS,
+  UNFINISHED_SANCTUMS,
   LOTUS_RELICS,
   FORGE_WEAPONS,
   LAYOFF_BOSS_CONFIG,
   RECRUITER_TEMPLE_CONFIG,
   HYPO_GUIDE_CONFIG,
   PortfolioStop,
+  UnfinishedSanctum,
   LotusRelic,
   ForgeWeapon,
   WeaponId,
@@ -47,6 +49,73 @@ export const MAX_STEP_UP_HEIGHT = 0.78;
 
 
 
+export interface DirectionalGuidanceResult {
+  distance: number;
+  bearingDeg: number;
+  relativeBearingDeg: number;
+  cardinalLabel: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+  turnDirection: 'ahead' | 'left' | 'right' | 'behind';
+  turnInstruction: string;
+}
+
+/**
+ * Computes compass bearing, relative turn angle, cardinal direction, and human-readable turn instruction
+ * from the player's current position and camera heading toward a target point.
+ */
+export function computeDirectionalGuidance(
+  playerPos: Vec2XZ,
+  targetPos: Vec2XZ,
+  headingDeg: number
+): DirectionalGuidanceResult {
+  const dx = targetPos.x - playerPos.x;
+  const dz = targetPos.z - playerPos.z;
+  const distance = Math.round(Math.hypot(dx, dz));
+  // North is -Z (0 deg), East is +X (90 deg), South is +Z (180 deg), West is -X (270 deg)
+  const rad = Math.atan2(dx, -dz);
+  const bearingDeg = (((rad * (180 / Math.PI)) % 360) + 360) % 360;
+  const relativeBearingDeg = ((bearingDeg - headingDeg + 540) % 360) - 180;
+
+  const cardinals: ('N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW')[] = [
+    'N',
+    'NE',
+    'E',
+    'SE',
+    'S',
+    'SW',
+    'W',
+    'NW',
+  ];
+  const cardinalIdx = Math.round(bearingDeg / 45) % 8;
+  const cardinalLabel = cardinals[cardinalIdx];
+
+  const absRel = Math.abs(relativeBearingDeg);
+  let turnDirection: 'ahead' | 'left' | 'right' | 'behind';
+  let turnInstruction: string;
+
+  if (absRel <= 22) {
+    turnDirection = 'ahead';
+    turnInstruction = 'Straight Ahead';
+  } else if (absRel >= 135) {
+    turnDirection = 'behind';
+    turnInstruction = 'Behind You · Turn Around';
+  } else if (relativeBearingDeg < 0) {
+    turnDirection = 'left';
+    turnInstruction = absRel <= 55 ? 'Bear Left' : 'Turn Left';
+  } else {
+    turnDirection = 'right';
+    turnInstruction = absRel <= 55 ? 'Bear Right' : 'Turn Right';
+  }
+
+  return {
+    distance,
+    bearingDeg,
+    relativeBearingDeg,
+    cardinalLabel,
+    turnDirection,
+    turnInstruction,
+  };
+}
+
 /**
  * Finds the next unvisited PortfolioStop for guidance.
  */
@@ -55,13 +124,14 @@ export function findNextGuidanceSanctum(
   visitedStopIds: ReadonlySet<string>,
   stops: PortfolioStop[] = PORTFOLIO_STOPS
 ): { stop: PortfolioStop; distance: number } | null {
-  // Sort stops by index or proximity? Usually index for a portfolio.
   const unvisited = stops.filter((s) => !visitedStopIds.has(s.id));
   if (unvisited.length === 0) return null;
 
-  // Find the one with the lowest index first
-  const nextByIndex = unvisited.sort((a, b) => a.indexNumber.localeCompare(b.indexNumber))[0];
-  const distance = Math.hypot(playerPos.x - nextByIndex.position.x, playerPos.z - nextByIndex.position.z);
+  const nextByIndex = [...unvisited].sort((a, b) => a.indexNumber.localeCompare(b.indexNumber))[0];
+  const distance = Math.hypot(
+    playerPos.x - nextByIndex.position.x,
+    playerPos.z - nextByIndex.position.z
+  );
 
   return { stop: nextByIndex, distance };
 }
@@ -236,13 +306,15 @@ export function groundHeightAt(x: number, z: number): number {
     recruiterPlateau = rt * rt * (3 - 2 * rt) * 1.35;
   }
 
-  // Gentle East & West Sanctuary Terraces
+  // Gentle East, West & Southern Construction Sanctuary Terraces
   let terraceHeight = 0;
   const sideDist = Math.min(
     Math.hypot(x - 38, z - -16),
     Math.hypot(x - 40, z - 24),
     Math.hypot(x - -38, z - 24),
-    Math.hypot(x - -38, z - -16)
+    Math.hypot(x - -38, z - -16),
+    Math.hypot(x - 26, z - 44),
+    Math.hypot(x - -26, z - 44)
   );
   if (sideDist < 13) {
     const st = 1 - sideDist / 13;
@@ -290,6 +362,10 @@ export function isOnStoneSurfaceAt(x: number, z: number): boolean {
   // 6 Project Sanctum Plinths
   for (const stop of PORTFOLIO_STOPS) {
     if (Math.hypot(x - stop.position.x, z - stop.position.z) <= 6.8) return true;
+  }
+  // 2 Unfinished Construction Sanctum Plinths
+  for (const wip of UNFINISHED_SANCTUMS) {
+    if (Math.hypot(x - wip.position.x, z - wip.position.z) <= 6.5) return true;
   }
   // 4 Weapon Forge Altars
   for (const wf of FORGE_WEAPONS) {
@@ -389,6 +465,35 @@ export function walkableSurfaceHeightAt(
       const altarY = monBaseY + 1.28;
       if (altarY > bestSurfaceY && canStepOnto(altarY)) {
         bestSurfaceY = altarY;
+      }
+    }
+  }
+
+  // 2A. 2 Unfinished Construction Sanctums (Stepped Foundation Plinths + Front Approach Ramps)
+  for (const wip of UNFINISHED_SANCTUMS) {
+    const dx = x - wip.position.x;
+    const dz = z - wip.position.z;
+    const r = Math.hypot(dx, dz);
+    if (r > 7.4) continue;
+
+    const wipBaseY = groundHeightAt(wip.position.x, wip.position.z);
+    if (Math.abs(dx) <= 1.65 && dz >= 4.2 && dz <= 6.8) {
+      const stairT = 1 - Math.max(0, Math.min(1, (dz - 4.4) / 2.2));
+      const stairY = wipBaseY + stairT * 0.72;
+      if (stairY > bestSurfaceY && canStepOnto(stairY)) {
+        bestSurfaceY = stairY;
+      }
+    }
+    if (r <= 5.65) {
+      const step1Y = wipBaseY + 0.46;
+      if (step1Y > bestSurfaceY && canStepOnto(step1Y)) {
+        bestSurfaceY = step1Y;
+      }
+    }
+    if (r <= 4.35) {
+      const step2Y = wipBaseY + 0.72;
+      if (step2Y > bestSurfaceY && canStepOnto(step2Y)) {
+        bestSurfaceY = step2Y;
       }
     }
   }
@@ -1001,6 +1106,9 @@ export function getWorldColliders(): CircleCollider[] {
     { id: 'col-ashoka', x: -38, z: 24, radius: 1.45 },
     { id: 'col-gopuram', x: -38, z: -16, radius: 2.35 },
     { id: 'col-stepwell', x: 0, z: 32, radius: 2.35 },
+    // 2 Unfinished Construction Sanctum central scaffolding & boulder cores
+    { id: 'col-wip-adtech', x: 26, z: 44, radius: 2.35 },
+    { id: 'col-wip-sisyphean', x: -26, z: 44, radius: 2.35 },
     // Southern Recruiter Opportunity Temple central altar pedestal
     {
       id: 'col-recruiter-temple-core',
@@ -1113,6 +1221,35 @@ export function findNearestStop(
     nearestStop,
     distance: bestDist,
     inRange: bestDist <= nearestStop.interactionRadius,
+  };
+}
+
+/**
+ * Finds the nearest Unfinished / Under-Construction Sanctum (`UNFINISHED_SANCTUMS`) and whether the player is within its interactionRadius.
+ */
+export function findNearestUnfinishedSanctum(
+  playerPos: Vec2XZ,
+  sanctums: UnfinishedSanctum[] = UNFINISHED_SANCTUMS
+): {
+  nearestSanctum: UnfinishedSanctum;
+  distance: number;
+  inRange: boolean;
+} {
+  let nearestSanctum = sanctums[0];
+  let bestDist = Infinity;
+
+  for (const s of sanctums) {
+    const d = Math.hypot(playerPos.x - s.position.x, playerPos.z - s.position.z);
+    if (d < bestDist) {
+      bestDist = d;
+      nearestSanctum = s;
+    }
+  }
+
+  return {
+    nearestSanctum,
+    distance: bestDist,
+    inRange: bestDist <= nearestSanctum.interactionRadius,
   };
 }
 
@@ -1317,6 +1454,10 @@ export function getRegionNameAt(x: number, z: number): string {
   const near = findNearestStop({ x, z });
   if (near.distance <= near.nearestStop.interactionRadius + 3.5) {
     return near.nearestStop.title;
+  }
+  const nearWip = findNearestUnfinishedSanctum({ x, z });
+  if (nearWip.distance <= nearWip.nearestSanctum.interactionRadius + 3.0) {
+    return `${nearWip.nearestSanctum.title} · Under Construction`;
   }
   if (
     Math.hypot(

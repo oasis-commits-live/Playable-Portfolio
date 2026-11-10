@@ -293,6 +293,7 @@ export const StopModal: React.FC<StopModalProps> = ({
               )}
               <button
                 type="button"
+                data-testid="close-stop-modal"
                 onClick={onClose}
                 aria-label="Close Ancient Scroll"
                 className="px-3.5 py-1.5 clip-blade-right bg-[#131d31] hover:bg-[#d4af37] hover:text-[#05070b] border-l-2 border-[#d4af37] font-hud text-xs font-bold tracking-[0.18em] uppercase text-[#f8f5ee] transition-colors cursor-pointer shrink-0"

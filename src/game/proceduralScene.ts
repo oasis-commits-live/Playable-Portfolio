@@ -5,6 +5,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {
   PORTFOLIO_STOPS,
+  UNFINISHED_SANCTUMS,
   LOTUS_RELICS,
   FORGE_WEAPONS,
   INITIAL_DEMON_SPAWNS,
@@ -12,6 +13,7 @@ import {
   RECRUITER_TEMPLE_CONFIG,
   HYPO_GUIDE_CONFIG,
   MonumentType,
+  UnfinishedSanctum,
   WeaponId,
   DemonArchetype,
 } from '../data/portfolioStops';
@@ -165,6 +167,33 @@ export interface MonumentRig {
   baseY: number;
 }
 
+export interface ConstructionWorkerRig {
+  group: THREE.Group;
+  torsoGroup: THREE.Group;
+  headGroup: THREE.Group;
+  rightArmPivot: THREE.Group;
+  leftArmPivot: THREE.Group;
+  leftLegPivot: THREE.Group;
+  rightLegPivot: THREE.Group;
+  role: 'hammer' | 'blueprint' | 'haul' | 'push_boulder';
+  phase: number;
+  basePos: THREE.Vector3;
+  baseYaw: number;
+  sparkWorldPos: THREE.Vector3;
+  lastSparkCycle: number;
+}
+
+export interface UnfinishedSanctumRig {
+  id: string;
+  sanctum: UnfinishedSanctum;
+  group: THREE.Group;
+  haloRing: THREE.Mesh;
+  craneBlockGroup: THREE.Group;
+  centerpieceMesh: THREE.Object3D;
+  workers: ConstructionWorkerRig[];
+  baseY: number;
+}
+
 export interface RelicRig {
   id: string;
   group: THREE.Group;
@@ -190,6 +219,7 @@ export interface AncientWorldScene {
   scene: THREE.Scene;
   playerRig: PlayerRig;
   monumentRigs: Map<string, MonumentRig>;
+  unfinishedSanctumRigs: Map<string, UnfinishedSanctumRig>;
   relicRigs: Map<string, RelicRig>;
   weaponForgeRigs: Map<WeaponId, WeaponForgeRig>;
   recruiterTempleGroup: THREE.Group;
@@ -1259,28 +1289,34 @@ function createCorporateNameplateSprite(
 ): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
-  canvas.height = 128;
+  canvas.height = 112;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = 'rgba(7, 9, 16, 0.88)';
-  ctx.beginPath();
-  ctx.roundRect(12, 16, 488, 96, 16);
-  ctx.fill();
+  const grad = ctx.createLinearGradient(32, 0, 480, 0);
+  grad.addColorStop(0, 'rgba(5, 7, 12, 0)');
+  grad.addColorStop(0.22, 'rgba(5, 7, 12, 0.72)');
+  grad.addColorStop(0.78, 'rgba(5, 7, 12, 0.72)');
+  grad.addColorStop(1, 'rgba(5, 7, 12, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(32, 16, 448, 80);
 
   const hexStr = `#${accentHex.toString(16).padStart(6, '0')}`;
-  ctx.strokeStyle = hexStr;
-  ctx.lineWidth = 3.5;
-  ctx.stroke();
+  const lineGrad = ctx.createLinearGradient(96, 0, 416, 0);
+  lineGrad.addColorStop(0, 'rgba(255,255,255,0)');
+  lineGrad.addColorStop(0.5, hexStr);
+  lineGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = lineGrad;
+  ctx.fillRect(96, 62, 320, 2);
 
-  ctx.font = '900 26px sans-serif';
+  ctx.font = '800 22px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(name.length > 34 ? name.slice(0, 32) + '…' : name, 256, 48);
+  ctx.fillStyle = '#f8f5ee';
+  ctx.fillText(name.length > 34 ? name.slice(0, 32) + '…' : name, 256, 42);
 
-  ctx.font = '700 18px monospace';
-  ctx.fillStyle = '#fda4af';
-  ctx.fillText(subtitle.toUpperCase(), 256, 84);
+  ctx.font = '600 15px monospace';
+  ctx.fillStyle = '#cbd5e1';
+  ctx.fillText(subtitle.toUpperCase(), 256, 78);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -1290,7 +1326,7 @@ function createCorporateNameplateSprite(
     depthWrite: false,
   });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(2.8, 0.7, 1);
+  sprite.scale.set(2.3, 0.5, 1);
   return sprite;
 }
 
@@ -2097,6 +2133,689 @@ function createMonumentMesh(
 }
 
 /**
+ * Builds an articulated 3D Sthapati Artisan Construction Worker Rig
+ * with hard-hat/headband, tunic, articulated legs/arms, and role-specific tools:
+ * - 'hammer': holds stone-mason mallet & chisel, strikes the stone rhythmically
+ * - 'blueprint': holds glowing architectural scroll tablet & gestures at scaffolding
+ * - 'haul': grips the timber crane hoist rope, heaving up and down
+ * - 'push_boulder': braces with both hands leaning forward into the Sisyphean boulder
+ */
+function createSthapatiConstructionWorkerRig(
+  role: 'hammer' | 'blueprint' | 'haul' | 'push_boulder',
+  accentColor: THREE.Color,
+  localPos: THREE.Vector3,
+  baseYaw: number,
+  phase: number,
+  worldSanctumPos: { x: number; y: number; z: number },
+  goldMat: THREE.Material,
+  darkStoneMat: THREE.Material
+): ConstructionWorkerRig {
+  const group = new THREE.Group();
+  group.position.copy(localPos);
+  group.rotation.y = baseYaw;
+
+  const tunicMat = new THREE.MeshPhysicalMaterial({
+    color: role === 'blueprint' ? 0x1e3a5f : role === 'push_boulder' ? 0x7f1d1d : 0x334155,
+    roughness: 0.45,
+    metalness: 0.22,
+    clearcoat: 0.35,
+  });
+  const skinBronzeMat = new THREE.MeshPhysicalMaterial({
+    color: 0xb47b56,
+    roughness: 0.38,
+    metalness: 0.15,
+    clearcoat: 0.25,
+  });
+  const helmetMat = new THREE.MeshPhysicalMaterial({
+    color: accentColor,
+    emissive: accentColor,
+    emissiveIntensity: 0.38,
+    roughness: 0.18,
+    metalness: 0.85,
+    clearcoat: 0.9,
+  });
+
+  const torsoGroup = new THREE.Group();
+  torsoGroup.position.y = 0.72;
+  group.add(torsoGroup);
+
+  const torsoMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.19, 0.36, 16, 24),
+    tunicMat
+  );
+  torsoMesh.position.y = 0.24;
+  torsoMesh.castShadow = true;
+  torsoGroup.add(torsoMesh);
+
+  // Artisan Tool Belt & Gold Sash
+  const sash = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.21, 0.09, 24),
+    goldMat
+  );
+  sash.position.y = 0.05;
+  torsoGroup.add(sash);
+
+  // Head + Sthapati Builder Hard-Hat Dome & Headlamp Visor
+  const headGroup = new THREE.Group();
+  headGroup.position.set(0, 0.62, 0);
+  torsoGroup.add(headGroup);
+
+  const headSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.145, 24, 20),
+    skinBronzeMat
+  );
+  headSphere.castShadow = true;
+  headGroup.add(headSphere);
+
+  const hardHatDome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.165, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.58),
+    helmetMat
+  );
+  hardHatDome.position.y = 0.03;
+  const hardHatBrim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.195, 0.195, 0.025, 24),
+    goldMat
+  );
+  hardHatBrim.position.set(0, 0.02, 0.02);
+  const headlampGem = new THREE.Mesh(
+    new THREE.SphereGeometry(0.038, 14, 12),
+    new THREE.MeshBasicMaterial({ color: 0xfef08a })
+  );
+  headlampGem.position.set(0, 0.08, 0.16);
+  headGroup.add(hardHatDome, hardHatBrim, headlampGem);
+
+  // Articulated Legs
+  const leftLegPivot = new THREE.Group();
+  leftLegPivot.position.set(-0.095, 0.7, 0);
+  const leftLegMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.068, 0.42, 12, 18),
+    darkStoneMat
+  );
+  leftLegMesh.position.y = -0.26;
+  leftLegPivot.add(leftLegMesh);
+  group.add(leftLegPivot);
+
+  const rightLegPivot = new THREE.Group();
+  rightLegPivot.position.set(0.095, 0.7, 0);
+  const rightLegMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.068, 0.42, 12, 18),
+    darkStoneMat
+  );
+  rightLegMesh.position.y = -0.26;
+  rightLegPivot.add(rightLegMesh);
+  group.add(rightLegPivot);
+
+  // Articulated Left & Right Arms + Role-Specific Construction Tools
+  const leftArmPivot = new THREE.Group();
+  leftArmPivot.position.set(-0.24, 0.44, 0);
+  const leftArmMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.055, 0.34, 12, 18),
+    skinBronzeMat
+  );
+  leftArmMesh.position.set(0, -0.16, 0.06);
+  leftArmMesh.rotation.x = 0.45;
+  leftArmPivot.add(leftArmMesh);
+  torsoGroup.add(leftArmPivot);
+
+  const rightArmPivot = new THREE.Group();
+  rightArmPivot.position.set(0.24, 0.44, 0);
+  const rightArmMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.055, 0.34, 12, 18),
+    skinBronzeMat
+  );
+  rightArmMesh.position.set(0, -0.16, 0.06);
+  rightArmMesh.rotation.x = 0.45;
+  rightArmPivot.add(rightArmMesh);
+  torsoGroup.add(rightArmPivot);
+
+  if (role === 'hammer') {
+    // Heavy Sthapati Stone-Mason Mallet in Right Hand + Glowing Chisel in Left Hand
+    const handle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.022, 0.026, 0.52, 14),
+      goldMat
+    );
+    handle.position.set(0, -0.32, 0.22);
+    handle.rotation.x = Math.PI * 0.42;
+    const malletHead = new THREE.Mesh(
+      new RoundedBoxGeometry(0.18, 0.14, 0.28, 3, 0.025),
+      darkStoneMat
+    );
+    malletHead.position.set(0, -0.36, 0.44);
+    const malletGoldBands = new THREE.Mesh(
+      new RoundedBoxGeometry(0.19, 0.15, 0.08, 2, 0.015),
+      helmetMat
+    );
+    malletGoldBands.position.set(0, -0.36, 0.44);
+    rightArmPivot.add(handle, malletHead, malletGoldBands);
+
+    const chisel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.028, 0.36, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+    );
+    chisel.position.set(0.06, -0.26, 0.26);
+    chisel.rotation.x = Math.PI * 0.38;
+    leftArmPivot.add(chisel);
+  } else if (role === 'blueprint') {
+    // Glowing Holographic Blueprint Scroll Tablet in Left Hand
+    const tablet = new THREE.Mesh(
+      new RoundedBoxGeometry(0.36, 0.03, 0.28, 3, 0.01),
+      new THREE.MeshBasicMaterial({ color: accentColor })
+    );
+    tablet.position.set(0.08, -0.22, 0.28);
+    tablet.rotation.x = -0.35;
+    leftArmPivot.add(tablet);
+  } else if (role === 'haul') {
+    // Vertical Hoist Rope Segment held in both hands
+    const rope = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, 1.9, 10),
+      goldMat
+    );
+    rope.position.set(-0.12, 0.55, 0.28);
+    rightArmPivot.add(rope);
+  }
+
+  // Grounding Contact Shadow Disc under Worker
+  const workerShadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.38, 24).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0x05070c,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+    })
+  );
+  workerShadow.position.y = 0.02;
+  group.add(workerShadow);
+
+  const forwardX = Math.sin(baseYaw) * 0.65;
+  const forwardZ = Math.cos(baseYaw) * 0.65;
+  const sparkWorldPos = new THREE.Vector3(
+    worldSanctumPos.x + localPos.x + forwardX,
+    worldSanctumPos.y + localPos.y + 1.05,
+    worldSanctumPos.z + localPos.z + forwardZ
+  );
+
+  return {
+    group,
+    torsoGroup,
+    headGroup,
+    rightArmPivot,
+    leftArmPivot,
+    leftLegPivot,
+    rightLegPivot,
+    role,
+    phase,
+    basePos: localPos.clone(),
+    baseYaw,
+    sparkWorldPos,
+    lastSparkCycle: -1,
+  };
+}
+
+/**
+ * Builds an Unfinished / Half-Built Sanctum Under Construction (`adtech_scaffolding` or `sisyphean_boulder`)
+ * complete with timber scaffolding, A-frame pulley crane, half-carved pillars, sealed chains,
+ * and 4 animated Sthapati Artisan Workers actively constructing the sanctum!
+ */
+function createUnfinishedSanctumMesh(
+  wip: UnfinishedSanctum,
+  stoneMat: THREE.Material,
+  darkStoneMat: THREE.Material,
+  goldMat: THREE.Material
+): UnfinishedSanctumRig {
+  const group = new THREE.Group();
+  const baseY = groundHeightAt(wip.position.x, wip.position.z);
+  group.position.set(wip.position.x, baseY, wip.position.z);
+
+  const accentCol = new THREE.Color(wip.accentColor);
+
+  const timberMat = new THREE.MeshPhysicalMaterial({
+    color: 0x5c3a21,
+    roughness: 0.72,
+    metalness: 0.08,
+    clearcoat: 0.18,
+  });
+  const hazardStripeMat = new THREE.MeshBasicMaterial({
+    color: accentCol,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.86,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const wireframeHoloMat = new THREE.MeshBasicMaterial({
+    color: accentCol,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.55,
+  });
+
+  // 1. Half-Built Stepped Jagati Foundation Plinth (Walkable +0.46m and +0.72m)
+  const lowerStep = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.35, 5.75, 0.46, 48),
+    darkStoneMat
+  );
+  lowerStep.position.y = 0.23;
+  lowerStep.receiveShadow = true;
+  group.add(lowerStep);
+
+  const upperStep = new THREE.Mesh(
+    new THREE.CylinderGeometry(4.1, 4.4, 0.28, 48),
+    stoneMat
+  );
+  upperStep.position.y = 0.59;
+  upperStep.receiveShadow = true;
+  group.add(upperStep);
+
+  // Front Approach Stone Steps (+Z side so player can walk up to inspect the construction barrier)
+  for (let s = 0; s < 3; s++) {
+    const stepSlab = new THREE.Mesh(
+      new RoundedBoxGeometry(2.8 - s * 0.15, 0.22, 0.68, 3, 0.03),
+      s % 2 === 0 ? stoneMat : darkStoneMat
+    );
+    stepSlab.position.set(0, 0.11 + s * 0.2, 5.85 - s * 0.62);
+    stepSlab.receiveShadow = true;
+    group.add(stepSlab);
+  }
+
+  // Glowing Under-Construction Perimeter Ring on the Ground
+  const haloRing = new THREE.Mesh(
+    new THREE.RingGeometry(5.85, 6.28, 64).rotateX(-Math.PI / 2),
+    hazardStripeMat
+  );
+  haloRing.position.y = 0.06;
+  group.add(haloRing);
+
+  // 2. Half-Built Hoysala Temple Pillars (2 Full Height, 2 Half-Carved Mid-Height, 2 Stumps)
+  const fullPillarGeo = createHoysalaLathePillarGeometry(3.5);
+  const halfPillarGeo = createHoysalaLathePillarGeometry(2.0);
+  const stumpPillarGeo = createHoysalaLathePillarGeometry(0.95);
+
+  const pillarAngles = [
+    { a: Math.PI * 0.72, kind: 'full' },
+    { a: Math.PI * 1.28, kind: 'full' },
+    { a: Math.PI * 0.25, kind: 'half' },
+    { a: Math.PI * 1.75, kind: 'half' },
+    { a: Math.PI * 0.48, kind: 'stump' },
+    { a: Math.PI * 1.52, kind: 'stump' },
+  ];
+
+  for (const p of pillarAngles) {
+    const px = Math.cos(p.a) * 3.25;
+    const pz = Math.sin(p.a) * 3.25;
+    const geo =
+      p.kind === 'full'
+        ? fullPillarGeo
+        : p.kind === 'half'
+        ? halfPillarGeo
+        : stumpPillarGeo;
+    const hOffset =
+      p.kind === 'full' ? 0.72 + 1.75 : p.kind === 'half' ? 0.72 + 1.0 : 0.72 + 0.48;
+    const col = new THREE.Mesh(geo, stoneMat);
+    col.position.set(px, hOffset, pz);
+    col.castShadow = true;
+    group.add(col);
+
+    // Wireframe holographic projection showing the unbuilt upper half of the partial pillars!
+    if (p.kind !== 'full') {
+      const ghostTop = new THREE.Mesh(halfPillarGeo, wireframeHoloMat);
+      ghostTop.position.set(px, hOffset + 1.35, pz);
+      group.add(ghostTop);
+    }
+  }
+
+  // 3. Multi-Tier Bamboo/Timber Scaffolding Lattice & Catwalk Planks around the Back & Sides
+  const scaffoldRadius = 3.75;
+  const poleAngles = [
+    Math.PI * 0.65,
+    Math.PI * 0.92,
+    Math.PI * 1.18,
+    Math.PI * 1.45,
+    Math.PI * 1.78,
+    Math.PI * 0.22,
+  ];
+  const poleGeo = new THREE.CylinderGeometry(0.075, 0.085, 5.4, 14);
+  for (const pa of poleAngles) {
+    const sx = Math.cos(pa) * scaffoldRadius;
+    const sz = Math.sin(pa) * scaffoldRadius;
+    const pole = new THREE.Mesh(poleGeo, timberMat);
+    pole.position.set(sx, 0.72 + 2.7, sz);
+    pole.castShadow = true;
+    group.add(pole);
+  }
+
+  // Horizontal Scaffolding Cross-Ledgers & Wooden Catwalk Planks at 2 Tiers (y = 2.6m and y = 4.3m)
+  for (const tierY of [2.55, 4.25]) {
+    const ledgerArc = new THREE.Mesh(
+      new THREE.TorusGeometry(scaffoldRadius, 0.06, 12, 40, Math.PI * 1.35),
+      timberMat
+    );
+    ledgerArc.rotation.x = Math.PI / 2;
+    ledgerArc.rotation.z = Math.PI * 0.82;
+    ledgerArc.position.y = tierY;
+    group.add(ledgerArc);
+
+    for (let idx = 0; idx < 4; idx++) {
+      const plankAngle = Math.PI * (0.75 + idx * 0.28);
+      const plank = new THREE.Mesh(
+        new RoundedBoxGeometry(1.85, 0.08, 0.58, 2, 0.015),
+        timberMat
+      );
+      plank.position.set(
+        Math.cos(plankAngle) * (scaffoldRadius - 0.15),
+        tierY + 0.06,
+        Math.sin(plankAngle) * (scaffoldRadius - 0.15)
+      );
+      plank.rotation.y = -plankAngle + Math.PI / 2;
+      plank.castShadow = true;
+      group.add(plank);
+    }
+  }
+
+  // Stacked Raw Sandstone Blocks & Timber Pallets around the Construction Perimeter
+  const rawBlockCoords = [
+    { x: -3.6, z: 2.8, rot: 0.25 },
+    { x: 3.7, z: 2.6, rot: -0.35 },
+    { x: -2.8, z: -3.5, rot: 0.6 },
+  ];
+  for (const rb of rawBlockCoords) {
+    const pallet = new THREE.Mesh(
+      new RoundedBoxGeometry(1.15, 0.1, 0.95, 2, 0.015),
+      timberMat
+    );
+    pallet.position.set(rb.x, 0.77, rb.z);
+    pallet.rotation.y = rb.rot;
+    const stoneBlock1 = new THREE.Mesh(
+      new RoundedBoxGeometry(0.88, 0.46, 0.68, 3, 0.03),
+      stoneMat
+    );
+    stoneBlock1.position.set(rb.x, 1.05, rb.z);
+    stoneBlock1.rotation.y = rb.rot + 0.1;
+    stoneBlock1.castShadow = true;
+    const stoneBlock2 = new THREE.Mesh(
+      new RoundedBoxGeometry(0.68, 0.38, 0.56, 3, 0.025),
+      darkStoneMat
+    );
+    stoneBlock2.position.set(rb.x + 0.08, 1.46, rb.z - 0.04);
+    stoneBlock2.rotation.y = rb.rot - 0.18;
+    group.add(pallet, stoneBlock1, stoneBlock2);
+  }
+
+  // 4. Timber A-Frame Pulley Crane & Swaying Suspended Stone Block
+  const craneBase = new THREE.Group();
+  craneBase.position.set(2.15, 0.72, -1.95);
+  craneBase.rotation.y = -0.55;
+  group.add(craneBase);
+
+  const craneLegGeo = new THREE.CylinderGeometry(0.085, 0.11, 5.8, 14);
+  const leftCraneLeg = new THREE.Mesh(craneLegGeo, timberMat);
+  leftCraneLeg.position.set(-0.55, 2.75, 0);
+  leftCraneLeg.rotation.z = -0.14;
+  leftCraneLeg.rotation.x = 0.22;
+  const rightCraneLeg = new THREE.Mesh(craneLegGeo, timberMat);
+  rightCraneLeg.position.set(0.55, 2.75, 0);
+  rightCraneLeg.rotation.z = 0.14;
+  rightCraneLeg.rotation.x = 0.22;
+  const craneJibBeam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.075, 0.09, 3.8, 14),
+    timberMat
+  );
+  craneJibBeam.position.set(0, 5.2, 1.05);
+  craneJibBeam.rotation.x = Math.PI * 0.38;
+  const pulleyWheel = new THREE.Mesh(
+    new THREE.TorusGeometry(0.24, 0.05, 12, 24),
+    goldMat
+  );
+  pulleyWheel.position.set(0, 5.55, 2.35);
+  pulleyWheel.rotation.y = Math.PI / 2;
+  craneBase.add(leftCraneLeg, rightCraneLeg, craneJibBeam, pulleyWheel);
+
+  const craneBlockGroup = new THREE.Group();
+  craneBlockGroup.position.set(2.15 - Math.sin(0.55) * 2.35, 0.72 + 5.55, -1.95 + Math.cos(0.55) * 2.35);
+  group.add(craneBlockGroup);
+
+  const hoistCable = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.022, 0.022, 2.1, 10),
+    goldMat
+  );
+  hoistCable.position.y = -1.05;
+  const suspendedStone = new THREE.Mesh(
+    new RoundedBoxGeometry(0.92, 0.68, 0.92, 3, 0.04),
+    stoneMat
+  );
+  suspendedStone.position.y = -2.25;
+  suspendedStone.castShadow = true;
+  const slingHarness = new THREE.Mesh(
+    new THREE.TorusGeometry(0.58, 0.032, 12, 28),
+    goldMat
+  );
+  slingHarness.position.y = -2.25;
+  craneBlockGroup.add(hoistCable, suspendedStone, slingHarness);
+
+  // 5. Theme-Specific Centerpiece (`adtech_scaffolding` vs `sisyphean_boulder`)
+  const centerpieceGroup = new THREE.Group();
+  centerpieceGroup.position.set(0, 0.72, 0);
+  group.add(centerpieceGroup);
+
+  if (wip.theme === 'adtech_scaffolding') {
+    // Half-Constructed Ad-Matrix Obelisk Core + Wireframe Hologram Ad Screens + Chained/Sealed Altar
+    const coreBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.35, 1.65, 1.1, 32),
+      darkStoneMat
+    );
+    coreBase.position.y = 0.55;
+    const halfObelisk = new THREE.Mesh(
+      new RoundedBoxGeometry(1.45, 2.4, 1.45, 4, 0.06),
+      stoneMat
+    );
+    halfObelisk.position.y = 2.1;
+    halfObelisk.castShadow = true;
+
+    // Unbuilt Upper Spire projected as a glowing Amber Wireframe Blueprint
+    const wireframeSpire = new THREE.Mesh(
+      new THREE.ConeGeometry(1.25, 2.6, 8),
+      wireframeHoloMat
+    );
+    wireframeSpire.position.y = 4.55;
+
+    // 3 Floating Holographic Ad-Platform Frame Panels orbiting the unfinished core
+    const holoPanelsGroup = new THREE.Group();
+    holoPanelsGroup.name = 'AnimatedCenterpieceSub';
+    holoPanelsGroup.position.y = 2.65;
+    for (let p = 0; p < 3; p++) {
+      const a = (p / 3) * Math.PI * 2;
+      const frame = new THREE.Mesh(
+        new RoundedBoxGeometry(1.15, 0.72, 0.05, 2, 0.015),
+        new THREE.MeshBasicMaterial({
+          color: accentCol,
+          transparent: true,
+          opacity: 0.48,
+        })
+      );
+      frame.position.set(Math.cos(a) * 1.65, (p - 1) * 0.32, Math.sin(a) * 1.65);
+      frame.rotation.y = -a + Math.PI / 2;
+      holoPanelsGroup.add(frame);
+    }
+
+    // Sealed & Chained Scroll Pedestal at the Front (Cannot be opened!)
+    const sealedPedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.52, 0.68, 1.05, 24),
+      darkStoneMat
+    );
+    sealedPedestal.position.set(0, 0.52, 2.35);
+    const lockChain1 = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.045, 12, 28),
+      goldMat
+    );
+    lockChain1.position.set(0, 0.75, 2.35);
+    lockChain1.rotation.set(0.45, 0.3, 0);
+    const lockChain2 = lockChain1.clone();
+    lockChain2.rotation.set(-0.45, -0.3, 0);
+    centerpieceGroup.add(coreBase, halfObelisk, wireframeSpire, holoPanelsGroup, sealedPedestal, lockChain1, lockChain2);
+  } else {
+    // Sisyphean Rage Game Sanctum: Steep Jagged Mountain Ramp + Colossal Cracked Sisyphean Boulder being pushed uphill!
+    const rampSlab = new THREE.Mesh(
+      new RoundedBoxGeometry(2.6, 0.55, 5.4, 4, 0.05),
+      darkStoneMat
+    );
+    rampSlab.position.set(0, 1.35, -0.35);
+    rampSlab.rotation.x = 0.44; // Steep 25-degree Sisyphean incline rising toward -Z
+    rampSlab.castShadow = true;
+    rampSlab.receiveShadow = true;
+
+    const rampSideRails = new THREE.Mesh(
+      new RoundedBoxGeometry(2.85, 0.22, 5.45, 3, 0.03),
+      goldMat
+    );
+    rampSideRails.position.copy(rampSlab.position);
+    rampSideRails.rotation.copy(rampSlab.rotation);
+
+    // Colossal Cracked Sisyphean Boulder with Glowing Crimson Rage Veins
+    const boulderGroup = new THREE.Group();
+    boulderGroup.name = 'AnimatedCenterpieceSub';
+    boulderGroup.position.set(0, 2.55, -0.55);
+
+    const boulderSphere = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(1.22, 2),
+      stoneMat
+    );
+    boulderSphere.castShadow = true;
+    const rageVeinRing1 = new THREE.Mesh(
+      new THREE.TorusGeometry(1.19, 0.045, 14, 36),
+      new THREE.MeshBasicMaterial({ color: 0xf43f5e })
+    );
+    const rageVeinRing2 = rageVeinRing1.clone();
+    rageVeinRing2.rotation.x = Math.PI / 2;
+    rageVeinRing2.rotation.y = 0.65;
+    boulderGroup.add(boulderSphere, rageVeinRing1, rageVeinRing2);
+
+    // Timber Bracing Struts wedged behind the boulder
+    const strutLeft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 2.2, 12),
+      timberMat
+    );
+    strutLeft.position.set(-0.75, 1.35, 0.65);
+    strutLeft.rotation.x = -0.68;
+    const strutRight = strutLeft.clone();
+    strutRight.position.x = 0.75;
+
+    centerpieceGroup.add(rampSlab, rampSideRails, boulderGroup, strutLeft, strutRight);
+  }
+
+  // 6. Spawn 4 Animated 3D Sthapati Artisan Workers around the Unfinished Sanctum!
+  const worldSanctumPos = { x: wip.position.x, y: baseY, z: wip.position.z };
+  const workerConfigs: {
+    role: 'hammer' | 'blueprint' | 'haul' | 'push_boulder';
+    pos: THREE.Vector3;
+    yaw: number;
+    phase: number;
+  }[] =
+    wip.theme === 'sisyphean_boulder'
+      ? [
+          // Worker 1: Actively pushing the colossal Sisyphean boulder up the steep ramp!
+          {
+            role: 'push_boulder',
+            pos: new THREE.Vector3(0, 1.28, 1.05),
+            yaw: Math.PI,
+            phase: 0.0,
+          },
+          // Worker 2: Chiseling the East half-built Hoysala pillar with sparks
+          {
+            role: 'hammer',
+            pos: new THREE.Vector3(2.25, 0.72, 2.15),
+            yaw: 0.75,
+            phase: 1.4,
+          },
+          // Worker 3: Chiseling the West half-built Hoysala pillar with sparks
+          {
+            role: 'hammer',
+            pos: new THREE.Vector3(-2.25, 0.72, 2.15),
+            yaw: -0.75,
+            phase: 3.1,
+          },
+          // Worker 4: Architect reviewing blueprints at the front steps
+          {
+            role: 'blueprint',
+            pos: new THREE.Vector3(-1.85, 0.46, 4.45),
+            yaw: 0.35,
+            phase: 2.2,
+          },
+        ]
+      : [
+          // Worker 1: Hammering the East half-built pillar on the plinth
+          {
+            role: 'hammer',
+            pos: new THREE.Vector3(2.2, 0.72, 2.1),
+            yaw: 0.78,
+            phase: 0.0,
+          },
+          // Worker 2: Hammering the central Ad-Matrix obelisk core
+          {
+            role: 'hammer',
+            pos: new THREE.Vector3(-1.35, 0.72, 0.95),
+            yaw: 2.25,
+            phase: 1.85,
+          },
+          // Worker 3: Hauling the timber crane hoist cable to lift the stone block
+          {
+            role: 'haul',
+            pos: new THREE.Vector3(1.15, 0.72, -0.45),
+            yaw: -2.4,
+            phase: 0.9,
+          },
+          // Worker 4: Lead Sthapati Architect inspecting blueprints at the front barrier
+          {
+            role: 'blueprint',
+            pos: new THREE.Vector3(1.85, 0.46, 4.45),
+            yaw: -0.4,
+            phase: 2.7,
+          },
+        ];
+
+  const workers: ConstructionWorkerRig[] = [];
+  for (const wc of workerConfigs) {
+    const wRig = createSthapatiConstructionWorkerRig(
+      wc.role,
+      accentCol,
+      wc.pos,
+      wc.yaw,
+      wc.phase,
+      worldSanctumPos,
+      goldMat,
+      darkStoneMat
+    );
+    group.add(wRig.group);
+    workers.push(wRig);
+  }
+
+  // 7. Front-Mounted 3D Construction Signboard (mounted low at y=2.65 so it never overlaps the Top-Center HUD Compass!)
+  const signTitle =
+    wip.theme === 'adtech_scaffolding'
+      ? '🔨 ADTECH SANCTUM (WIP)'
+      : '🔨 SISYPHEAN GAME (WIP)';
+  const workerTagSprite = createCorporateNameplateSprite(
+    signTitle,
+    'ARTISANS AT WORK · SEALED',
+    accentCol.getHex()
+  );
+  workerTagSprite.scale.set(3.6, 0.78, 1);
+  workerTagSprite.position.set(0, 2.65, 3.85);
+  group.add(workerTagSprite);
+
+  return {
+    id: wip.id,
+    sanctum: wip,
+    group,
+    haloRing,
+    craneBlockGroup,
+    centerpieceMesh: centerpieceGroup,
+    workers,
+    baseY,
+  };
+}
+
+/**
  * Builds Lush, Fuller Alpine Meadow & Hillside Grass Field (0.56m medium-full height, 7-blade tufts,
  * distributed across both the central valley AND the surrounding hills up to r = 138m!)
  */
@@ -2227,6 +2946,14 @@ function createZeldaWindGrassField(isSoftwareGl: boolean): {
       if (Math.hypot(gx - stop.position.x, gz - stop.position.z) < 6.3) {
         insideMonument = true;
         break;
+      }
+    }
+    if (!insideMonument) {
+      for (const wip of UNFINISHED_SANCTUMS) {
+        if (Math.hypot(gx - wip.position.x, gz - wip.position.z) < 6.8) {
+          insideMonument = true;
+          break;
+        }
       }
     }
     if (insideMonument) continue;
@@ -3520,6 +4247,14 @@ export function buildAncientWorldScene(
     });
   }
 
+  // 8B. Build the 2 Unfinished / Under-Construction Sanctums with Active 3D Sthapati Workers!
+  const unfinishedSanctumRigs = new Map<string, UnfinishedSanctumRig>();
+  for (const wip of UNFINISHED_SANCTUMS) {
+    const wipRig = createUnfinishedSanctumMesh(wip, stoneMat, darkStoneMat, goldMat);
+    scene.add(wipRig.group);
+    unfinishedSanctumRigs.set(wip.id, wipRig);
+  }
+
   // 9. Build the 5 Collectible Career Experience Lotus Relics (16-Petal Sculpted Padma Lotus Blossoms!)
   const relicRigs = new Map<string, RelicRig>();
   const lotusMat = new THREE.MeshPhysicalMaterial({
@@ -3937,14 +4672,14 @@ export function buildAncientWorldScene(
   hypoHalo.position.set(0, 0.05, 0);
   hypoGuideGroup.add(hypoHalo);
 
-  // Sleek Floating Nameplate Pill above Hypo
+  // Subtle Floating Nameplate above Hypo
   const hypoBubbleSprite = createCorporateNameplateSprite(
-    '👋 HI! I’M HYPO',
-    '[E] AI PORTFOLIO COMPANION',
+    'HYPO',
+    'AI COMPANION',
     0x2dd4bf
   );
-  hypoBubbleSprite.scale.set(2.15, 0.54, 1);
-  hypoBubbleSprite.position.set(0, 2.24, 0);
+  hypoBubbleSprite.scale.set(1.25, 0.28, 1);
+  hypoBubbleSprite.position.set(0, 2.08, 0);
   hypoGuideGroup.add(hypoBubbleSprite);
 
   // Studio-Grade High-Subdivision Artisan Porcelain & Brushed-Gold Teddy-Bot Companion ("Hypo")
@@ -4238,14 +4973,35 @@ export function buildAncientWorldScene(
   // 13B. Procedural Weather System Rig (Falling Petals, Solar Dust Motes & Low-Lying Valley Mist)
   const weatherRig = createProceduralWeatherRig(scene, 'dawn');
 
-  // 14. Golden Prana Guidance Trail (18 Smooth Glowing Stepping Spheres/Drop Gems from Player to Tracked Objective)
-  const trailNodes = 18;
-  const trailGeo = new THREE.SphereGeometry(0.14, 16, 12);
-  trailGeo.scale(1.15, 0.45, 1.65);
+  // 14. Golden Prana Guidance Trail (28 Luminous Directional Chevron Arrows from Player to Tracked Sanctum)
+  const trailNodes = 28;
+  const chevronShape = new THREE.Shape();
+  chevronShape.moveTo(0, 0.42);
+  chevronShape.lineTo(0.34, -0.18);
+  chevronShape.lineTo(0.18, -0.32);
+  chevronShape.lineTo(0, -0.04);
+  chevronShape.lineTo(-0.18, -0.32);
+  chevronShape.lineTo(-0.34, -0.18);
+  chevronShape.closePath();
+
+  const trailGeo = new THREE.ExtrudeGeometry(chevronShape, {
+    steps: 1,
+    depth: 0.08,
+    bevelEnabled: true,
+    bevelThickness: 0.02,
+    bevelSize: 0.02,
+    bevelSegments: 2,
+  });
+  // Rotate so chevron lies flat horizontally with its arrow tip pointing along +Z (forward along dirYaw)
+  trailGeo.rotateX(Math.PI / 2);
+  trailGeo.computeVertexNormals();
+
   const trailMat = new THREE.MeshBasicMaterial({
     color: 0xfef08a,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.92,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
   const guidanceTrailMesh = new THREE.InstancedMesh(trailGeo, trailMat, trailNodes);
   guidanceTrailMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -4273,18 +5029,18 @@ export function buildAncientWorldScene(
       return;
     }
     const dirYaw = Math.atan2(dx, dz);
-    const maxSpan = Math.min(dist - 1.5, 34);
+    const maxSpan = Math.min(dist - 1.4, 42);
 
     for (let i = 0; i < trailNodes; i++) {
-      const flowPct = ((i / trailNodes) + elapsed * 0.42) % 1.0;
-      const d = 1.6 + flowPct * maxSpan;
+      const flowPct = ((i / trailNodes) + elapsed * 0.36) % 1.0;
+      const d = 1.4 + flowPct * maxSpan;
       const nx = playerX + (dx / dist) * d;
       const nz = playerZ + (dz / dist) * d;
-      const ny = groundHeightAt(nx, nz) + 0.24 + Math.sin(elapsed * 4.5 + i * 0.6) * 0.08;
+      const ny = groundHeightAt(nx, nz) + 0.58 + Math.sin(elapsed * 4.2 + i * 0.45) * 0.09;
       trailDummy.position.set(nx, ny, nz);
       trailDummy.rotation.set(0, dirYaw, 0);
       const fade = Math.sin(flowPct * Math.PI);
-      trailDummy.scale.setScalar(Math.max(0.15, fade * 1.15));
+      trailDummy.scale.setScalar(Math.max(0.32, fade * 1.35));
       trailDummy.updateMatrix();
       guidanceTrailMesh.setMatrixAt(i, trailDummy.matrix);
     }
@@ -4829,6 +5585,91 @@ export function buildAncientWorldScene(
       wf.haloRing.rotation.z = elapsed * 0.75;
     });
 
+    // 6. Animate Unfinished Sanctums, Pulley Cranes, Sisyphean Boulder & Sthapati Construction Workers!
+    unfinishedSanctumRigs.forEach((wipRig) => {
+      wipRig.haloRing.rotation.z = elapsed * 0.38;
+
+      // Sway and hoist the suspended stone block on the A-frame crane
+      wipRig.craneBlockGroup.rotation.z = Math.sin(elapsed * 1.6 + wipRig.baseY) * 0.06;
+      wipRig.craneBlockGroup.rotation.x = Math.cos(elapsed * 1.3 + wipRig.baseY) * 0.05;
+      wipRig.craneBlockGroup.position.y =
+        0.72 + 5.55 + Math.sin(elapsed * 1.8 + wipRig.baseY) * 0.22;
+
+      const animSub = wipRig.centerpieceMesh.getObjectByName('AnimatedCenterpieceSub');
+      if (animSub) {
+        if (wipRig.sanctum.theme === 'adtech_scaffolding') {
+          animSub.rotation.y = elapsed * 0.85;
+          animSub.position.y = 2.65 + Math.sin(elapsed * 2.4) * 0.1;
+        } else {
+          // Sisyphean boulder inches uphill as the worker pushes, then slips back slightly in an eternal struggle!
+          const pushCycle = (elapsed * 1.35) % (Math.PI * 2);
+          const heave = Math.sin(pushCycle);
+          animSub.position.z = -0.55 - heave * 0.26;
+          animSub.position.y = 2.55 + heave * 0.12;
+          animSub.rotation.x = -heave * 0.45;
+        }
+      }
+
+      // Animate each Sthapati Artisan Worker around the sanctum
+      const distToSanctum = Math.hypot(
+        wipRig.sanctum.position.x - playerRig.group.position.x,
+        wipRig.sanctum.position.z - playerRig.group.position.z
+      );
+
+      for (const w of wipRig.workers) {
+        const t = elapsed * 5.2 + w.phase;
+        if (w.role === 'hammer') {
+          // Rhythmic overhead mallet swing + torso lean + periodic chisel spark burst!
+          const strikeWave = Math.sin(t);
+          w.rightArmPivot.rotation.x = -0.95 + strikeWave * 1.15;
+          w.leftArmPivot.rotation.x = -0.25 + Math.cos(t * 0.5) * 0.08;
+          w.torsoGroup.rotation.x = 0.12 + Math.max(0, strikeWave) * 0.18;
+          w.headGroup.rotation.x = Math.sin(t) * 0.1;
+
+          // Emit golden stone-chisel sparks when player is within 34m and mallet strikes down
+          const cycleIndex = Math.floor((t + Math.PI * 0.2) / (Math.PI * 2));
+          if (cycleIndex > w.lastSparkCycle) {
+            w.lastSparkCycle = cycleIndex;
+            if (distToSanctum < 34) {
+              particlePool.spawnBurst(
+                w.sparkWorldPos.x,
+                w.sparkWorldPos.y,
+                w.sparkWorldPos.z,
+                6,
+                true
+              );
+            }
+          }
+        } else if (w.role === 'push_boulder') {
+          // Leaning deep into the Sisyphean boulder, legs driving and heaving with the boulder!
+          const pushCycle = elapsed * 1.35;
+          const heave = Math.sin(pushCycle);
+          w.group.position.z = w.basePos.z - heave * 0.24;
+          w.group.position.y = w.basePos.y + heave * 0.11;
+          w.torsoGroup.rotation.x = 0.52 + Math.sin(elapsed * 6.0) * 0.08;
+          w.rightArmPivot.rotation.x = -1.25 + Math.sin(elapsed * 6.0) * 0.12;
+          w.leftArmPivot.rotation.x = -1.25 + Math.cos(elapsed * 6.0) * 0.12;
+          w.leftLegPivot.rotation.x = Math.sin(elapsed * 5.5) * 0.38;
+          w.rightLegPivot.rotation.x = -Math.sin(elapsed * 5.5) * 0.38;
+        } else if (w.role === 'haul') {
+          // Heaving the crane hoist rope hand-over-hand
+          const pull = Math.sin(elapsed * 3.6 + w.phase);
+          w.torsoGroup.rotation.x = -0.15 + pull * 0.24;
+          w.rightArmPivot.rotation.x = -0.85 + pull * 0.45;
+          w.leftArmPivot.rotation.x = -0.65 - pull * 0.45;
+          w.leftLegPivot.rotation.x = pull * 0.15;
+          w.rightLegPivot.rotation.x = -pull * 0.15;
+        } else {
+          // 'blueprint': Inspecting tablet & gesturing upward at the scaffolding
+          w.leftArmPivot.rotation.x = -0.55 + Math.sin(elapsed * 2.2 + w.phase) * 0.08;
+          w.rightArmPivot.rotation.x = -0.75 + Math.sin(elapsed * 3.1 + w.phase) * 0.42;
+          w.rightArmPivot.rotation.z = -0.25 + Math.cos(elapsed * 2.4 + w.phase) * 0.2;
+          w.headGroup.rotation.y = Math.sin(elapsed * 1.6 + w.phase) * 0.32;
+          w.headGroup.rotation.x = -0.18 + Math.cos(elapsed * 2.0 + w.phase) * 0.14;
+        }
+      }
+    });
+
     particlePool.update(dt);
     weatherRig.update(elapsed, dt, playerRig.group.position.x, playerRig.group.position.z);
   }
@@ -4868,6 +5709,7 @@ export function buildAncientWorldScene(
     scene,
     playerRig,
     monumentRigs,
+    unfinishedSanctumRigs,
     relicRigs,
     weaponForgeRigs,
     recruiterTempleGroup,

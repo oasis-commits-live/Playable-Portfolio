@@ -103,8 +103,8 @@ export const ProceduralWeatherSystem: React.FC<ProceduralWeatherSystemProps> = (
 
   return (
     <div className="relative flex flex-col items-end" data-testid="procedural-weather-widget">
-      {/* Compact Top-Right Weather Pill + Drawer Toggle */}
-      <div className="flex items-center gap-1">
+      {/* Compact Top-Right Weather Icon Toggle */}
+      <div className="flex items-center">
         <button
           type="button"
           tabIndex={-1}
@@ -117,14 +117,10 @@ export const ProceduralWeatherSystem: React.FC<ProceduralWeatherSystemProps> = (
             e.currentTarget.blur();
             setDrawerOpen((prev) => !prev);
           }}
-          className="px-2 h-6 font-hud text-xs font-bold tracking-[0.14em] uppercase text-[#f8f5ee] hover:text-[#fef08a] transition-colors cursor-pointer flex items-center gap-1.5"
-          title={`Procedural Weather: ${profile.title} — ${profile.subtitle} [Key K]`}
+          className="w-7 h-7 flex items-center justify-center bg-[#060a14]/70 hover:bg-[#101c30] border border-white/10 hover:border-[#d4af37]/60 text-[#f8f5ee] hover:text-[#fef08a] transition-colors cursor-pointer"
+          title={`Atmosphere: ${profile.title} (${timeOfDay === 'twilight' ? 'Dusk' : timeOfDay}) [Key K]`}
         >
           {renderWeatherGlyph(profile.kind, profile.primaryParticleHex)}
-          <span style={{ color: profile.primaryParticleHex }}>{profile.title}</span>
-          <span className="font-mono text-[9px] text-[#94a3b8]">
-            {weatherPreset === 'auto' ? '[AUTO]' : '[LOCK]'}
-          </span>
         </button>
       </div>
 

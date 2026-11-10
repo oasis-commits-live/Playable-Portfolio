@@ -71,10 +71,56 @@
 .cinematic-vignette {
   background: radial-gradient(
     circle at 50% 50%,
-    rgba(5, 7, 11, 0) 58%,
-    rgba(4, 6, 12, 0.42) 86%,
-    rgba(2, 4, 8, 0.78) 100%
+    rgba(5, 7, 11, 0) 64%,
+    rgba(4, 6, 12, 0.35) 88%,
+    rgba(2, 4, 8, 0.72) 100%
   );
+}
+
+.hud-text-shadow {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 2px 10px rgba(0, 0, 0, 0.85);
+}
+
+.compass-fade-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+}
+
+.glass-panel {
+  background: rgba(6, 10, 18, 0.92);
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.78);
+}
+
+.glass-button {
+  background: rgba(8, 13, 24, 0.82);
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  color: #f4efe6;
+  transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-button:hover {
+  background: rgba(20, 32, 56, 0.95);
+  border-color: rgba(254, 240, 138, 0.65);
+  color: #fef08a;
+}
+
+.glass-button.active {
+  background: rgba(212, 175, 55, 0.2);
+  border-color: #d4af37;
+  color: #fef08a;
 }
 
 /* Custom subtle scrollbars for codex panels */
@@ -94,3 +140,4 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(212, 175, 55, 0.85);
 }
+

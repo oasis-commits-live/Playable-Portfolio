@@ -1092,3 +1092,63 @@ export const HYPO_GUIDE_CONFIG = {
   accentColor: '#2dd4bf',
 };
 
+export interface UnfinishedSanctum {
+  id: string;
+  indexCode: string;
+  title: string;
+  sanskritTitle: string;
+  category: string;
+  statusBadge: string;
+  theme: 'adtech_scaffolding' | 'sisyphean_boulder';
+  position: { x: number; z: number };
+  interactionRadius: number;
+  accentColor: string;
+  workerCount: number;
+  revealedPoints: string[];
+  constructionNote: string;
+}
+
+export const UNFINISHED_SANCTUMS: UnfinishedSanctum[] = [
+  {
+    id: 'wip-adtech-sanctum',
+    indexCode: 'WIP-01',
+    title: 'Unfinished AdTech Sanctum',
+    sanskritTitle: 'Vijnapana Mandapa · Under Construction',
+    category: 'AdTech · Multi-Platform Ad Publishing',
+    statusBadge: 'UNDER CONSTRUCTION · CANNOT BE OPENED YET',
+    theme: 'adtech_scaffolding',
+    position: { x: 26, z: 44 },
+    interactionRadius: 9.0,
+    accentColor: '#f59e0b',
+    workerCount: 4,
+    revealedPoints: [
+      'AdTech',
+      'Sped up the process of publishing ads on different platforms',
+      'Increased productivity in sales ops team',
+      'Idea to Product in 4 days',
+    ],
+    constructionNote:
+      'Sthapati artisans are actively building this sanctum. Full scroll is sealed while the project is in progress.',
+  },
+  {
+    id: 'wip-sisyphean-game',
+    indexCode: 'WIP-02',
+    title: 'Unfinished Game Sanctum',
+    sanskritTitle: 'Krodha Shikhara · Game Forge in Progress',
+    category: 'Sisyphean Rage Game · Coming Soon on Steam',
+    statusBadge: 'UNDER CONSTRUCTION · CANNOT BE OPENED YET',
+    theme: 'sisyphean_boulder',
+    position: { x: -26, z: 44 },
+    interactionRadius: 9.0,
+    accentColor: '#f43f5e',
+    workerCount: 4,
+    revealedPoints: [
+      'Sisyphean game based on rage',
+      'Coming soon on Steam',
+    ],
+    constructionNote:
+      'Sthapati artisans are actively forging this boulder-climb sanctum. Full scroll is sealed until Steam launch.',
+  },
+];
+
+
